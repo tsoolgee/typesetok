@@ -9,7 +9,6 @@ pub mod hit_test;
 pub mod knuth_plass;
 pub mod multi_flow;
 pub mod shaper;
-pub mod talmud_simulation;
 
 pub use bidi::{BidiEngine, BidiRun};
 pub use co_pagination::{
@@ -32,8 +31,4 @@ pub use multi_flow::{
     DynamicTalmudPageResult, FlowGeometrySpec, MultiFlowSolver, SolvedFlowAllocation, SpreadSide,
 };
 pub use shaper::{PositionedGlyph, ShapedRun, TextShaper};
-pub use talmud_simulation::{
-    AnchorId, AnchorMapping, CommentaryInputItem, FlowSummary, GemaraInputChunk,
-    TalmudSimulationConfig, TalmudSimulationResult, TalmudSimulator, TalmudSyncError,
-};
 
