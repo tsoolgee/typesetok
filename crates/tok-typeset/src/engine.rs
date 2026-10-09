@@ -9,7 +9,7 @@ use crate::geometry::{
     BreakToken, GlyphBox, LineBox, PageLayoutBox, PhysicalRect, TextFrameBox, UNKNOWN_FONT,
 };
 use crate::hebrew_justify::HebrewJustifier;
-use crate::knuth_plass::{KnuthPlassBreaker, LayoutItem};
+use crate::knuth_plass::{KnuthPlassBreaker, LayoutItem, MeasureProfile};
 use crate::multi_flow::{FlowGeometrySpec, MultiFlowSolver, SpreadSide};
 use crate::shaper::PositionedGlyph;
 use rayon::prelude::*;
@@ -162,6 +162,25 @@ impl TypesettingEngine {
         )
     }
 
+    /// Typesets a single paragraph into formatted, justified LineBoxes matching a variable [`MeasureProfile`] (TeX `\parshape`).
+    pub fn typeset_paragraph_shaped(
+        &self,
+        paragraph: &ParagraphNode,
+        font_family: &str,
+        profile: &MeasureProfile,
+        font_size_pt: f32,
+        line_height_pt: f32,
+    ) -> Vec<LineBox> {
+        let session = self.font_manager.session(font_family);
+        Self::typeset_with_session_shaped(
+            &session,
+            paragraph,
+            profile,
+            font_size_pt,
+            line_height_pt,
+        )
+    }
+
     fn typeset_with_session(
         session: &ShapingSession<'_>,
         paragraph: &ParagraphNode,
@@ -169,8 +188,28 @@ impl TypesettingEngine {
         font_size_pt: f32,
         line_height_pt: f32,
     ) -> Vec<LineBox> {
+        if !column_width_pt.is_finite() || column_width_pt <= 0.0 {
+            return Vec::new();
+        }
+        let profile = MeasureProfile::uniform(column_width_pt);
+        Self::typeset_with_session_shaped(
+            session,
+            paragraph,
+            &profile,
+            font_size_pt,
+            line_height_pt,
+        )
+    }
+
+    fn typeset_with_session_shaped(
+        session: &ShapingSession<'_>,
+        paragraph: &ParagraphNode,
+        profile: &MeasureProfile,
+        font_size_pt: f32,
+        line_height_pt: f32,
+    ) -> Vec<LineBox> {
         let text = paragraph.text.as_str();
-        if text.trim().is_empty() || !column_width_pt.is_finite() || column_width_pt <= 0.0 {
+        if text.trim().is_empty() || !profile.is_valid() {
             return Vec::new();
         }
         let font_size = if font_size_pt.is_finite() && font_size_pt > 0.0 {
@@ -274,9 +313,12 @@ impl TypesettingEngine {
             offset: text.len() as u32,
         });
 
-        // 3. Run Knuth-Plass global line breaker
-        let spans =
-            KnuthPlassBreaker::break_paragraph_spans(&items, column_width_pt, LINE_BREAK_TOLERANCE);
+        // 3. Run Knuth-Plass global line breaker matching the profile
+        let spans = KnuthPlassBreaker::break_paragraph_spans_with_profile(
+            &items,
+            profile,
+            LINE_BREAK_TOLERANCE,
+        );
 
         // 4. Reorder, justify and position each line.
         let total_lines = spans.len();
@@ -322,13 +364,14 @@ impl TypesettingEngine {
                 }
             }
 
+            let target_w = span.target_width;
             let justified =
-                HebrewJustifier::justify_line(line_glyphs, column_width_pt, font_size, is_last);
+                HebrewJustifier::justify_line(line_glyphs, target_w, font_size, is_last);
 
             let line_width: f32 = justified.glyphs.iter().map(|g| g.x_advance).sum();
-            // RTL lines start at the right edge of the column.
+            // RTL lines start at the right edge of the assigned line measure.
             let mut current_x = if is_rtl {
-                column_width_pt - line_width
+                target_w - line_width
             } else {
                 0.0
             };

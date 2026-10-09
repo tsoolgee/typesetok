@@ -8,6 +8,7 @@ pub mod hit_test;
 pub mod knuth_plass;
 pub mod multi_flow;
 pub mod shaper;
+pub mod talmud_simulation;
 
 pub use bidi::{BidiEngine, BidiRun};
 pub use engine::{TypesettingEngine, TypesettingEngineConfig};
@@ -18,8 +19,13 @@ pub use geometry::{
 };
 pub use hebrew_justify::{HebrewJustifier, JustificationTier, JustifiedLine, AHALTERM_LETTERS};
 pub use hit_test::{HitTestResult, HitTester};
-pub use knuth_plass::{BrokenLine, KnuthPlassBreaker, LayoutItem, LineSpan};
+pub use knuth_plass::{BrokenLine, KnuthPlassBreaker, LayoutItem, LineSpan, MeasureProfile};
 pub use multi_flow::{
     DynamicTalmudPageResult, FlowGeometrySpec, MultiFlowSolver, SolvedFlowAllocation, SpreadSide,
 };
 pub use shaper::{PositionedGlyph, ShapedRun, TextShaper};
+pub use talmud_simulation::{
+    AnchorId, AnchorMapping, CommentaryInputItem, FlowSummary, GemaraInputChunk,
+    TalmudSimulationConfig, TalmudSimulationResult, TalmudSimulator, TalmudSyncError,
+};
+
