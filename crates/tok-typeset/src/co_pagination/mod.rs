@@ -7,6 +7,7 @@
 pub mod engine;
 pub mod sync;
 pub mod template;
+pub mod worker;
 
 pub use engine::{
     CoPaginatedChunk, CoPaginatedCommentary, CoPaginatedPage, CoPaginationDocument,
@@ -16,3 +17,4 @@ pub use sync::{
     ActiveSyncResult, ActiveSynchronizer, AnchorKey, AnchorPoint, SyncRemedy, SynchronizerConfig,
 };
 pub use template::{ColumnAllocation, SpreadMathematics, TemplateConfig, TemplateKind};
+pub use worker::{CancellationToken, NonBlockingPaginator, PaginationEvent};
