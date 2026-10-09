@@ -12,6 +12,13 @@ pub mod shaper;
 pub mod talmud_simulation;
 
 pub use bidi::{BidiEngine, BidiRun};
+pub use co_pagination::{
+    ActiveSyncResult, ActiveSynchronizer, AnchorKey, AnchorPoint, CancellationToken,
+    CoPaginatedChunk, CoPaginatedCommentary, CoPaginatedPage, CoPaginationDocument,
+    CoPaginationEngine, CoPaginationResult, ColumnAllocation, NonBlockingPaginator,
+    PaginationEvent, SpreadMathematics, SyncRemedy, SynchronizerConfig, TemplateConfig,
+    TemplateKind,
+};
 pub use engine::{TypesettingEngine, TypesettingEngineConfig};
 pub use font::{FontData, FontManager, FontMetrics};
 pub use gematria::{GematriaEngine, HEBREW_GERESH, HEBREW_GERSHAYIM};

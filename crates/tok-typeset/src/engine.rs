@@ -838,6 +838,41 @@ impl TypesettingEngine {
 
         pages
     }
+
+    /// Co-paginates a multi-stream commentary document (Talmud / Mikraot Gedolot / academic)
+    /// across facing pages with active anchor synchronization, automatic overflow splitting,
+    /// dynamic L-shape synthesis, and spine-relative margins.
+    pub fn typeset_co_paginated_document(
+        &self,
+        template: &crate::co_pagination::TemplateConfig,
+        sync_config: &crate::co_pagination::SynchronizerConfig,
+        doc: &crate::co_pagination::CoPaginationDocument,
+    ) -> crate::co_pagination::CoPaginationResult {
+        crate::co_pagination::CoPaginationEngine::co_paginate(template, sync_config, doc, self)
+    }
+
+    /// Spawns a background worker on an `Arc<TypesettingEngine>` to co-paginate a multi-stream
+    /// document asynchronously without blocking the UI thread.
+    ///
+    /// Pages and progress updates are streamed incrementally through the returned `Receiver<PaginationEvent>`,
+    /// and the job can be cancelled at any time using the `CancellationToken`.
+    pub fn paginate_co_paginated_document_async(
+        self: &std::sync::Arc<Self>,
+        template: crate::co_pagination::TemplateConfig,
+        sync_config: crate::co_pagination::SynchronizerConfig,
+        doc: crate::co_pagination::CoPaginationDocument,
+    ) -> (
+        std::sync::mpsc::Receiver<crate::co_pagination::PaginationEvent>,
+        crate::co_pagination::CancellationToken,
+    ) {
+        crate::co_pagination::NonBlockingPaginator::paginate_async(
+            template,
+            sync_config,
+            doc,
+            self.clone(),
+        )
+    }
+
 }
 
 #[cfg(test)]
@@ -1333,4 +1368,74 @@ mod tests {
         assert!(flow_ids.contains(&"rashi"));
         assert!(flow_ids.contains(&"tosafot"));
     }
+
+    #[test]
+    fn test_engine_typeset_co_paginated_document() {
+        use crate::co_pagination::{
+            AnchorKey, CoPaginatedChunk, CoPaginatedCommentary, CoPaginationDocument,
+            SynchronizerConfig, TemplateConfig,
+        };
+
+        let eng = engine();
+        let tmpl = TemplateConfig::default();
+        let sync_cfg = SynchronizerConfig::default();
+
+        let doc = CoPaginationDocument {
+            main_chunks: vec![CoPaginatedChunk {
+                text: "מאימתי קורין את שמע בערבית משעה שהכהנים נכנסין".to_string(),
+                anchors: vec![(AnchorKey("m1".to_string()), "קורין".to_string())],
+            }],
+            rashi_items: vec![CoPaginatedCommentary {
+                target_anchor: AnchorKey("m1".to_string()),
+                text: "קורין את שמע: פירש רש\"י".to_string(),
+            }],
+            tosafot_items: vec![],
+        };
+
+        let result = eng.typeset_co_paginated_document(&tmpl, &sync_cfg, &doc);
+        assert!(!result.pages.is_empty());
+        assert_eq!(result.total_gemara_lines > 0, true);
+        assert_eq!(result.total_rashi_lines > 0, true);
+    }
+
+    #[test]
+    fn test_engine_paginate_co_paginated_document_async() {
+        use crate::co_pagination::{
+            AnchorKey, CoPaginatedChunk, CoPaginatedCommentary, CoPaginationDocument,
+            PaginationEvent, SynchronizerConfig, TemplateConfig,
+        };
+        use std::sync::Arc;
+
+        let eng = Arc::new(engine());
+        let tmpl = TemplateConfig::default();
+        let sync_cfg = SynchronizerConfig::default();
+
+        let doc = CoPaginationDocument {
+            main_chunks: vec![CoPaginatedChunk {
+                text: "תנו רבנן מעשה ברבי אליעזר ורבי יהושע שהיו מסובין".to_string(),
+                anchors: vec![(AnchorKey("a1".to_string()), "מסובין".to_string())],
+            }],
+            rashi_items: vec![CoPaginatedCommentary {
+                target_anchor: AnchorKey("a1".to_string()),
+                text: "מסובין: בהסבה של מצוה".to_string(),
+            }],
+            tosafot_items: vec![],
+        };
+
+        let (rx, _token) = eng.paginate_co_paginated_document_async(tmpl, sync_cfg, doc);
+        let mut got_page = false;
+        let mut got_finished = false;
+
+        while let Ok(event) = rx.recv() {
+            match event {
+                PaginationEvent::PageReady(_) => got_page = true,
+                PaginationEvent::Finished(_) => got_finished = true,
+                _ => {}
+            }
+        }
+
+        assert!(got_page, "Worker should stream at least one PageReady event");
+        assert!(got_finished, "Worker should emit Finished event");
+    }
 }
+
