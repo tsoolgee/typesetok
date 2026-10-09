@@ -1,4 +1,5 @@
 pub mod bidi;
+pub mod co_pagination;
 pub mod engine;
 pub mod font;
 pub mod gematria;
