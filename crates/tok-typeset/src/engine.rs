@@ -598,6 +598,16 @@ impl TypesettingEngine {
             pages.push(page);
         }
 
+        if pages.is_empty() {
+            pages.push(self.new_page(
+                1,
+                content_width,
+                content_height,
+                Vec::new(),
+                None,
+            ));
+        }
+
         pages
     }
 

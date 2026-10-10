@@ -73,3 +73,8 @@ exported_prepress.pdf
 Thumbs.db
 desktop.ini
 $RECYCLE.BIN/
+
+# --- Antigravity Agent & Local Skills ---
+.agents/
+.agent/
+skills/

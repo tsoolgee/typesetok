@@ -102,11 +102,15 @@ impl SectionNode {
     }
 
     pub fn main_flow_mut(&mut self) -> Option<&mut Flow> {
-        self.flows.iter_mut().find(|f| f.id == FlowId::main())
+        self.flows
+            .iter_mut()
+            .find(|f| f.id == FlowId::main() || f.id.0 == "gemara" || f.flow_type == FlowType::Main)
     }
 
     pub fn main_flow(&self) -> Option<&Flow> {
-        self.flows.iter().find(|f| f.id == FlowId::main())
+        self.flows
+            .iter()
+            .find(|f| f.id == FlowId::main() || f.id.0 == "gemara" || f.flow_type == FlowType::Main)
     }
 }
 
@@ -259,5 +263,104 @@ mod tests {
         let loaded = DocumentRoot::from_json(&json).expect("Deserialization must succeed");
         assert_eq!(loaded.metadata.title, "Test Doc");
         assert_eq!(loaded.sections[0].main_flow().unwrap().paragraphs.len(), 1);
+    }
+
+    #[test]
+    fn test_multi_flow_document_serialization_roundtrip() {
+        let mut root = DocumentRoot::new("דף גמרא - ברכות");
+        root.metadata.progression = Progression::Rtl;
+        root.metadata.primary_language = "he".to_string();
+
+        let sec = &mut root.sections[0];
+        sec.flows.clear();
+
+        // Main Gemara flow
+        let mut gemara_flow = Flow::new(FlowId::new("gemara"), FlowType::Main);
+        gemara_flow.add_paragraph(ParagraphNode::new(
+            FractionalIndex::new("a0"),
+            "style-gemara-main",
+            "מֵאֵימָתַי קוֹרִין אֶת שְׁמַע בְּעַרְבִית?",
+        ));
+        let gemara_expected_text = gemara_flow.paragraphs[0].text.clone();
+        sec.flows.push(gemara_flow);
+
+        // Rashi commentary flow
+        let mut rashi_flow = Flow::new(FlowId::new("rashi"), FlowType::CommentA);
+        rashi_flow.add_paragraph(ParagraphNode::new(
+            FractionalIndex::new("a0"),
+            "style-rashi-body",
+            "תַּנָּא אַקְּרָא קָאֵי דִּכְתִיב בְּשָׁכְבְּךָ וּבְקוּמֶךָ",
+        ));
+        let rashi_expected_text = rashi_flow.paragraphs[0].text.clone();
+        sec.flows.push(rashi_flow);
+
+        // Tosafot commentary flow
+        let mut tosafot_flow = Flow::new(FlowId::new("tosafot"), FlowType::CommentB);
+        tosafot_flow.add_paragraph(ParagraphNode::new(
+            FractionalIndex::new("a0"),
+            "style-tosafot-body",
+            "פֵּרֵשׁ רַשִׁ\"י דְּתַנָּא אַקְּרָא קָאֵי",
+        ));
+        sec.flows.push(tosafot_flow);
+
+        // Notes flow
+        let mut notes_flow = Flow::new(FlowId::new("notes"), FlowType::Footnote);
+        notes_flow.add_paragraph(ParagraphNode::new(
+            FractionalIndex::new("a0"),
+            "style-footnotes",
+            "תורה אור: דברים ו, ז.",
+        ));
+        sec.flows.push(notes_flow);
+
+        let json = root.to_json().expect("Multi-flow serialization must succeed");
+        let restored = DocumentRoot::from_json(&json).expect("Deserialization must succeed");
+
+        assert_eq!(restored.metadata.title, "דף גמרא - ברכות");
+        assert_eq!(restored.metadata.progression, Progression::Rtl);
+        assert_eq!(restored.sections.len(), 1);
+        assert_eq!(restored.sections[0].flows.len(), 4);
+
+        assert_eq!(restored.sections[0].flows[0].id.0, "gemara");
+        assert_eq!(
+            restored.sections[0].flows[0].paragraphs[0].text,
+            gemara_expected_text
+        );
+
+        assert_eq!(restored.sections[0].flows[1].id.0, "rashi");
+        assert_eq!(
+            restored.sections[0].flows[1].paragraphs[0].text,
+            rashi_expected_text
+        );
+        assert_eq!(restored.sections[0].flows[2].id.0, "tosafot");
+        assert_eq!(restored.sections[0].flows[3].id.0, "notes");
+
+        // Verify main_flow() finds the gemara flow
+        assert!(restored.sections[0].main_flow().is_some());
+        assert_eq!(restored.sections[0].main_flow().unwrap().id.0, "gemara");
+    }
+
+    #[test]
+    fn test_hebrew_niqqud_preservation_in_document() {
+        let text_with_niqqud = "שָׁלוֹם עֲלֵיכֶם מַלְאֲכֵי הַשָּׁרֵת מַלְאֲכֵי עֶלְיוֹן";
+        let p = ParagraphNode::new(FractionalIndex::initial(), "default-body", text_with_niqqud);
+        assert_eq!(p.text, HebrewNormalizer::normalize(text_with_niqqud));
+
+        let mut root = DocumentRoot::new("מנוקד");
+        root.sections[0].main_flow_mut().unwrap().add_paragraph(p.clone());
+
+        let json = root.to_json().unwrap();
+        let loaded = DocumentRoot::from_json(&json).unwrap();
+        let loaded_text = &loaded.sections[0].main_flow().unwrap().paragraphs[0].text;
+        assert_eq!(loaded_text, &p.text);
+    }
+
+    #[test]
+    fn test_empty_document_root() {
+        let root = DocumentRoot::new("");
+        let json = root.to_json().unwrap();
+        let loaded = DocumentRoot::from_json(&json).unwrap();
+        assert_eq!(loaded.metadata.title, "");
+        assert_eq!(loaded.sections.len(), 1);
+        assert_eq!(loaded.sections[0].flows[0].paragraphs.len(), 0);
     }
 }
