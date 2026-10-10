@@ -982,13 +982,17 @@ impl TypesettingEngine {
             });
 
             let break_token = if !all_exhausted {
-                let primary_flow = first_sec
+                let continuing_flow = first_sec
                     .flows
                     .iter()
-                    .find(|f| f.flow_type == FlowType::Main || f.placement_role.as_deref() == Some("primary"))
+                    .find(|f| {
+                        let cur = flow_cursors.get(&f.id.0).copied().unwrap_or(0);
+                        let total = flow_lines_map.get(&f.id.0).map_or(0, |v| v.len());
+                        cur < total
+                    })
                     .or_else(|| first_sec.flows.first());
 
-                primary_flow.and_then(|f| {
+                continuing_flow.and_then(|f| {
                     let cursor = flow_cursors.get(&f.id.0).copied().unwrap_or(0);
                     let lines = flow_lines_map.get(&f.id.0)?;
                     lines.get(cursor).map(|line| {
@@ -1638,6 +1642,112 @@ mod tests {
 
         assert!(got_page, "Worker should stream at least one PageReady event");
         assert!(got_finished, "Worker should emit Finished event");
+    }
+
+    #[test]
+    fn test_multi_flow_multi_page_cascading_and_completeness() {
+        use tok_core::model::{Flow, FlowId};
+
+        let mut doc = DocumentRoot::new("עימוד רב-עמודי");
+        let sec = &mut doc.sections[0];
+        sec.flows.clear();
+
+        // Short primary text (fits on page 1)
+        let mut main_flow = Flow::new(FlowId::new("main"), FlowType::Main);
+        main_flow.add_paragraph(ParagraphNode::new(
+            FractionalIndex::new("m01"),
+            "style-main",
+            "תלמוד בבלי מסכת ברכות דף ב עמוד א. מאימתי קורין את שמע בערבית משעה שהכהנים נכנסין לאכול בתרומתן.",
+        ));
+        sec.flows.push(main_flow);
+
+        // Long commentary text (overflows page 1 onto page 2 and page 3)
+        let mut comm_flow = Flow::new(FlowId::new("commentary"), FlowType::CommentA);
+        for i in 1..=15 {
+            comm_flow.add_paragraph(ParagraphNode::new(
+                FractionalIndex::new(format!("c{:02}", i)),
+                "style-comm",
+                &format!("פירוש והרחבה לקטע מספר {}: תנא אקרא קאי דכתיב בשכבך ובקומך והכי קתני זמן קריאת שמע של שכיבה אימת משעה שהכהנים נכנסין לאכול בתרומתן ואי בעית אימא יליף מברייתו של עולם דכתיב ויהי ערב ויהי בוקר יום אחד.", i),
+            ));
+        }
+        sec.flows.push(comm_flow);
+
+        let pages = engine().typeset_document(&doc);
+        assert!(pages.len() >= 2, "Long commentary should cascade to at least 2 pages, got {}", pages.len());
+
+        // Verify page numbering & gematria
+        assert_eq!(pages[0].page_number_gematria, "א׳");
+        assert_eq!(pages[1].page_number_gematria, "ב׳");
+
+        // Verify content completeness: all commentary paragraphs must appear in output lines
+        let all_lines_text: Vec<String> = pages
+            .iter()
+            .flat_map(|p| p.frames.iter())
+            .filter(|f| f.flow_id.contains("commentary"))
+            .flat_map(|f| f.lines.iter().map(|l| l.text.clone()))
+            .collect();
+
+        assert!(!all_lines_text.is_empty(), "Commentary lines must be placed");
+        // Verify that paragraph 1 and paragraph 15 both appear in the text
+        let combined_text = all_lines_text.join(" ");
+        assert!(combined_text.contains("קטע מספר 1:"), "First commentary paragraph must appear");
+        assert!(combined_text.contains("קטע מספר 15:"), "Last commentary paragraph must appear");
+
+        // Verify break token on first page
+        assert!(pages[0].break_token.is_some(), "First page should have a break token pointing to continuation");
+    }
+
+    #[test]
+    fn test_multi_flow_asymmetrical_three_streams_continuity() {
+        use tok_core::model::{Flow, FlowId};
+
+        let mut doc = DocumentRoot::new("שלוש זרימות אסימטריות");
+        let sec = &mut doc.sections[0];
+        sec.flows.clear();
+
+        // Primary: 2 paragraphs
+        let mut main_flow = Flow::new(FlowId::new("main"), FlowType::Main);
+        main_flow.add_paragraph(ParagraphNode::new(FractionalIndex::new("m1"), "main", "פסקה ראשית ראשונה."));
+        main_flow.add_paragraph(ParagraphNode::new(FractionalIndex::new("m2"), "main", "פסקה ראשית שנייה."));
+        sec.flows.push(main_flow);
+
+        // Commentary 1 (Rashi): 8 paragraphs
+        let mut rashi_flow = Flow::new(FlowId::new("rashi"), FlowType::CommentA);
+        for i in 1..=8 {
+            rashi_flow.add_paragraph(ParagraphNode::new(
+                FractionalIndex::new(format!("r{:02}", i)),
+                "rashi",
+                &format!("דיבור המתחיל רש\"י פסקה מספר {}: פירוש דברי הגמרא באריכות ובתוספת ביאור מקיף.", i),
+            ));
+        }
+        sec.flows.push(rashi_flow);
+
+        // Commentary 2 (Tosafot): 4 paragraphs
+        let mut tosafot_flow = Flow::new(FlowId::new("tosafot"), FlowType::CommentB);
+        for i in 1..=4 {
+            tosafot_flow.add_paragraph(ParagraphNode::new(
+                FractionalIndex::new(format!("t{:02}", i)),
+                "tosafot",
+                &format!("תוספות דיבור המתחיל {}: קושיא ופירוקא על דברי רש\"י והגמרא.", i),
+            ));
+        }
+        sec.flows.push(tosafot_flow);
+
+        let pages = engine().typeset_document(&doc);
+        assert!(!pages.is_empty());
+
+        // Check zero dropped paragraphs across all frames
+        let rashi_lines: Vec<String> = pages
+            .iter()
+            .flat_map(|p| p.frames.iter())
+            .filter(|f| f.flow_id.contains("rashi"))
+            .flat_map(|f| f.lines.iter().map(|l| l.text.clone()))
+            .collect();
+
+        let rashi_combined = rashi_lines.join(" ");
+        for i in 1..=8 {
+            assert!(rashi_combined.contains(&format!("פסקה מספר {}:", i)), "Rashi paragraph {} must not be dropped", i);
+        }
     }
 }
 
