@@ -629,7 +629,7 @@ impl TypesettingEngine {
             self.config.page_height_pt - self.config.margin_top_pt - self.config.margin_bottom_pt;
 
         let Some(first_sec) = doc.sections.first() else {
-            return Vec::new();
+            return vec![self.new_page(1, content_width, content_height, Vec::new(), None, "gemara")];
         };
 
         // Layout lines for each flow
@@ -1387,6 +1387,16 @@ mod tests {
         assert!(flow_ids.contains(&"main"));
         assert!(flow_ids.contains(&"rashi"));
         assert!(flow_ids.contains(&"tosafot"));
+    }
+
+    #[test]
+    fn test_typeset_empty_document_produces_single_empty_page() {
+        let doc = DocumentRoot::new("ריק");
+        let pages = engine().typeset_document(&doc);
+        assert_eq!(pages.len(), 1);
+        assert_eq!(pages[0].page_index, 0);
+        assert_eq!(pages[0].frames.len(), 1);
+        assert!(pages[0].frames[0].lines.is_empty());
     }
 
     #[test]
