@@ -959,6 +959,38 @@ impl TypesettingEngine {
                 });
             }
 
+            let all_exhausted = flow_cursors.iter().all(|(fid, &idx)| {
+                let total = flow_lines_map.get(fid).map_or(0, |v| v.len());
+                idx >= total
+            });
+
+            let break_token = if !all_exhausted {
+                let primary_flow = first_sec
+                    .flows
+                    .iter()
+                    .find(|f| f.flow_type == FlowType::Main || f.placement_role.as_deref() == Some("primary"))
+                    .or_else(|| first_sec.flows.first());
+
+                primary_flow.and_then(|f| {
+                    let cursor = flow_cursors.get(&f.id.0).copied().unwrap_or(0);
+                    let lines = flow_lines_map.get(&f.id.0)?;
+                    lines.get(cursor).map(|line| {
+                        BreakToken {
+                            section_index: 0,
+                            paragraph_index: cursor,
+                            char_offset: line
+                                .glyphs
+                                .iter()
+                                .map(|g| g.cluster as usize)
+                                .min()
+                                .unwrap_or(0),
+                        }
+                    })
+                })
+            } else {
+                None
+            };
+
             pages.push(PageLayoutBox {
                 page_index: current_page_num - 1,
                 page_number_gematria: GematriaEngine::to_hebrew_numeral(current_page_num),
@@ -969,15 +1001,10 @@ impl TypesettingEngine {
                     self.config.page_height_pt,
                 ),
                 frames: page_frames,
-                break_token: None,
+                break_token,
             });
 
             current_page_num += 1;
-
-            let all_exhausted = flow_cursors.iter().all(|(fid, &idx)| {
-                let total = flow_lines_map.get(fid).map_or(0, |v| v.len());
-                idx >= total
-            });
 
             if all_exhausted || !any_lines_placed || current_page_num > 500 {
                 break;
