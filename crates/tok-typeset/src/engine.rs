@@ -756,8 +756,25 @@ impl TypesettingEngine {
 
             let footnote_target = if has_notes { Some(50.0) } else { None };
 
+            // Determine active flows on this page (flows with unplaced lines)
+            let active_specs: Vec<FlowGeometrySpec> = flow_specs
+                .iter()
+                .filter(|s| {
+                    let cur = flow_cursors.get(&s.flow_id.0).copied().unwrap_or(0);
+                    let total = flow_lines_map.get(&s.flow_id.0).map_or(0, |v| v.len());
+                    cur < total
+                })
+                .cloned()
+                .collect();
+
+            let current_specs = if active_specs.is_empty() {
+                &flow_specs[..]
+            } else {
+                &active_specs[..]
+            };
+
             // Determine if primary stream finishes early on this page
-            let primary_spec = flow_specs
+            let primary_spec = current_specs
                 .iter()
                 .find(|s| s.role == FlowPlacementRole::Primary);
             let primary_target_h = if let Some(p_spec) = primary_spec {
@@ -785,7 +802,7 @@ impl TypesettingEngine {
                 self.config.margin_inner_pt,
                 self.config.margin_outer_pt,
                 self.config.margin_top_pt,
-                &flow_specs,
+                current_specs,
                 side,
                 primary_target_h,
                 footnote_target,
