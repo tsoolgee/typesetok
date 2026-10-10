@@ -35,6 +35,9 @@ jobs:
 
       - name: Run frontend tests
         run: npm test
+        env:
+          # Integration tests spawn the engine; use the release binary built above.
+          TOK_CLI_PATH: target/release/tok-cli.exe
 
       - name: Upload Desktop bundle artifact (Windows)
         uses: actions/upload-artifact@v4

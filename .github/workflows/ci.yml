@@ -89,6 +89,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # The frontend integration tests spawn the real tok-cli engine binary.
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build tok-cli (debug) for frontend integration tests
+        run: cargo build -p tok-cli
       - uses: actions/setup-node@v4
         with:
           node-version: 20
