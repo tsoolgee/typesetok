@@ -418,10 +418,11 @@ impl TypesettingEngine {
         content_height: f32,
         lines: Vec<LineBox>,
         break_token: Option<BreakToken>,
+        flow_id: &str,
     ) -> PageLayoutBox {
         let frame = TextFrameBox {
-            frame_id: format!("frame_{}", page_num),
-            flow_id: "main".to_string(),
+            frame_id: format!("frame_{}_{}", page_num, flow_id),
+            flow_id: flow_id.to_string(),
             rect: PhysicalRect::new(
                 self.config.margin_inner_pt,
                 self.config.margin_top_pt,
@@ -455,6 +456,12 @@ impl TypesettingEngine {
             self.config.page_width_pt - self.config.margin_inner_pt - self.config.margin_outer_pt;
         let content_height =
             self.config.page_height_pt - self.config.margin_top_pt - self.config.margin_bottom_pt;
+        let flow_id = doc
+            .sections
+            .first()
+            .and_then(|s| s.main_flow().or_else(|| s.flows.first()))
+            .map(|f| f.id.0.as_str())
+            .unwrap_or("gemara");
 
         // Paragraphs are laid out independently, so break them in parallel;
         // results come back in document order, keeping output deterministic.
@@ -563,6 +570,7 @@ impl TypesettingEngine {
                                 .and_then(|byte| p.text.get(..byte))
                                 .map_or(0, |s| s.chars().count()),
                         }),
+                        flow_id,
                     );
                     pages.push(page);
                     current_height = 0.0;
@@ -594,6 +602,7 @@ impl TypesettingEngine {
                 current_height,
                 current_page_lines,
                 None,
+                flow_id,
             );
             pages.push(page);
         }
@@ -605,6 +614,7 @@ impl TypesettingEngine {
                 content_height,
                 Vec::new(),
                 None,
+                flow_id,
             ));
         }
 
