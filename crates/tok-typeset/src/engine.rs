@@ -10,11 +10,17 @@ use crate::geometry::{
 };
 use crate::hebrew_justify::HebrewJustifier;
 use crate::knuth_plass::{KnuthPlassBreaker, LayoutItem, MeasureProfile};
+use crate::layout_classifier::DocumentClassifier;
+use crate::layout_family::LayoutFamily;
+use crate::layout_features::DocumentLayoutFeatures;
+use crate::layout_template::LayoutTemplate;
 use crate::multi_flow::{FlowGeometrySpec, FlowPlacementRole, MultiFlowSolver, SpreadSide};
 use crate::shaper::PositionedGlyph;
+use crate::template_synthesizer::TemplateSynthesizer;
 use rayon::prelude::*;
 use std::collections::HashMap;
 use tok_core::model::{DocumentRoot, FlowType, ParagraphNode};
+use tok_core::FlowId;
 use unicode_bidi::BidiInfo;
 
 const DEFAULT_FONT_FAMILY: &str = crate::font::DEFAULT_FAMILY;
@@ -632,48 +638,48 @@ impl TypesettingEngine {
             return vec![self.new_page(1, content_width, content_height, Vec::new(), None, "gemara")];
         };
 
-        // 1. Build geometric flow specs for MultiFlowSolver using flow metadata and roles
-        let flow_specs: Vec<FlowGeometrySpec> = first_sec
-            .flows
-            .iter()
-            .enumerate()
-            .map(|(idx, f)| {
-                let role = if let Some(role_str) = &f.placement_role {
-                    match role_str.to_lowercase().as_str() {
-                        "primary" => FlowPlacementRole::Primary,
-                        "inner_spine" | "innerspine" => FlowPlacementRole::InnerSpine,
-                        "outer_margin" | "outermargin" => FlowPlacementRole::OuterMargin,
-                        "bottom_band" | "bottomband" => FlowPlacementRole::BottomBand,
-                        _ => FlowPlacementRole::Column(idx),
-                    }
-                } else {
-                    match f.flow_type {
-                        FlowType::Main => FlowPlacementRole::Primary,
-                        FlowType::CommentA => FlowPlacementRole::InnerSpine,
-                        FlowType::CommentB => FlowPlacementRole::OuterMargin,
-                        FlowType::Footnote => FlowPlacementRole::BottomBand,
-                    }
-                };
+        let margin_x = self.config.margin_inner_pt + self.config.margin_outer_pt;
+        let margin_y = self.config.margin_top_pt + self.config.margin_bottom_pt;
 
-                let priority = match role {
-                    FlowPlacementRole::Primary => 1,
-                    FlowPlacementRole::InnerSpine => 2,
-                    FlowPlacementRole::OuterMargin => 3,
-                    FlowPlacementRole::BottomBand => 4,
-                    FlowPlacementRole::Column(c) => (c + 1) as u8,
-                };
-
-                let mut spec = FlowGeometrySpec::new(f.id.clone(), priority).with_role(role);
-                if let Some(ratio) = f.width_ratio {
-                    spec = spec.with_width_ratio(ratio);
-                } else if let Some(proportions) = &first_sec.column_proportions {
-                    if let Some(&ratio) = proportions.get(idx) {
-                        spec = spec.with_width_ratio(ratio);
-                    }
-                }
-                spec
+        // 1. Synthesize concrete LayoutTemplate via DocumentClassifier and TemplateSynthesizer
+        let features = DocumentLayoutFeatures::from_section(first_sec);
+        let classification = DocumentClassifier::classify(&features);
+        let template = TemplateSynthesizer::synthesize(
+            doc,
+            first_sec,
+            &classification.family,
+            self.config.page_width_pt,
+            self.config.page_height_pt,
+            margin_x,
+            margin_y,
+        )
+        .unwrap_or_else(|_| {
+            let fallback_family = LayoutFamily::CustomConstraints {
+                flow_ids: first_sec.flows.iter().map(|f| f.id.clone()).collect(),
+            };
+            TemplateSynthesizer::synthesize(
+                doc,
+                first_sec,
+                &fallback_family,
+                self.config.page_width_pt,
+                self.config.page_height_pt,
+                margin_x,
+                margin_y,
+            )
+            .unwrap_or_else(|_| {
+                let mut fallback_tmpl =
+                    LayoutTemplate::new(LayoutFamily::SingleFlow { flow_id: FlowId::main() });
+                fallback_tmpl.flow_specs = first_sec
+                    .flows
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, f)| FlowGeometrySpec::new(f.id.clone(), (idx + 1) as u8))
+                    .collect();
+                fallback_tmpl
             })
-            .collect();
+        });
+
+        let flow_specs: Vec<FlowGeometrySpec> = template.flow_specs.clone();
 
         // Solve nominal column allocations to determine column width for each flow
         let nominal_allocations = MultiFlowSolver::solve_generic_spread(
@@ -795,7 +801,7 @@ impl TypesettingEngine {
                 None
             };
 
-            let expansion_id = first_sec.expansion_flow_id.as_ref();
+            let expansion_id = template.expansion_flow_id.as_ref();
             let dynamic_result = MultiFlowSolver::solve_dynamic_spread_with_footnotes(
                 self.config.page_width_pt,
                 self.config.page_height_pt,
