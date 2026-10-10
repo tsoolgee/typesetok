@@ -10,7 +10,6 @@
 [![Tests](https://img.shields.io/badge/Tests-239%2F239%20Passing-brightgreen.svg)]()
 [![Electron](https://img.shields.io/badge/Electron-29.4%2B-blue.svg?logo=electron)](https://www.electronjs.org)
 [![Rust](https://img.shields.io/badge/Rust-1.85%2B-orange.svg?logo=rust)](https://www.rust-lang.org)
-[![Standard](https://img.shields.io/badge/Standard-ת"י%206100%20(SI%206100)-blue.svg)]()
 [![Pre-Press](https://img.shields.io/badge/PDF%2FX--1a%20%7C%20PDF%2FX--4-ISO%2015930-purple.svg)]()
 [![License](https://img.shields.io/badge/License-TOK--NCCL%20v1.0-blue.svg)](LICENSE.md)
 
