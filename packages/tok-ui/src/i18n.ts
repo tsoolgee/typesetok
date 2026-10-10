@@ -360,6 +360,8 @@ export const strings: Translations = {
   toastDemoLoaded: { he: 'פרויקט לדוגמה נטען בהצלחה', en: 'Sample project loaded' },
   toastOpenFile: { he: 'פתיחת קובץ: {path}', en: 'Opening file: {path}' },
   toastSaved: { he: 'המסמך נשמר בהצלחה בפורמט .tok', en: 'Document saved in .tok format' },
+  toastSaveError: { he: 'שגיאה בשמירת המסמך: {error}', en: 'Error saving document: {error}' },
+  toastOpenError: { he: 'שגיאה בפתיחת המסמך: {error}', en: 'Error opening document: {error}' },
   toastExporting: { he: 'מייצא לקובץ לדפוס ISO PDF/X-1a...', en: 'Exporting print-ready ISO PDF/X-1a...' },
   toastExportDone: { he: 'הייצוא לדפוס הושלם בהצלחה!', en: 'Print export completed!' },
   toastExportError: { he: 'שגיאת ייצוא: {error}', en: 'Export error: {error}' },

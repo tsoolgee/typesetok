@@ -370,7 +370,7 @@ export function documentStateToDocumentRoot(
  * Converts Rust `DocumentRoot` JSON format back to UI `MultiFlowDocumentState`.
  */
 export function documentRootToDocumentState(root: DocumentRootJson): MultiFlowDocumentState {
-  const title = (root.metadata?.title || 'מסמך ללא שם') + '.tok';
+  const title = root.metadata?.title || 'מסמך ללא שם';
   const sec = root.sections?.[0];
   const flows = sec?.flows || [];
 

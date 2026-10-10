@@ -26,7 +26,10 @@ import {
   DEFAULT_PROSE_FLOWS,
   TemplateType
 } from './engine/FlowPaginator';
-import { documentStateToDocumentRoot } from './engine/documentBridge';
+import {
+  documentStateToDocumentRoot,
+  documentRootToDocumentState
+} from './engine/documentBridge';
 
 import { toHebrewGematria } from './gematria';
 export { toHebrewGematria };
@@ -78,6 +81,7 @@ export class TypesetOkApp {
   private splitDivider!: HTMLElement;
   private panelOpenBeforeSplit: boolean | null = null;
   private documentTitle = '';
+  private currentFilePath: string | null = null;
   private workbench!: HTMLElement;
 
   // Feature modals are built on first use (they are hidden at startup).
@@ -1053,10 +1057,95 @@ export class TypesetOkApp {
     this.showToast(tf('toastProjectCreated', { name }));
   }
 
-  private openProjectFile(filePath: string): void {
+  private async saveDocumentToFile(filePath: string): Promise<boolean> {
+    const win = window as any;
+    if (this.storyEditor && this.activeFlowId) {
+      this.documentState.flows[this.activeFlowId] = this.storyEditor.getStory();
+    }
     const baseName = filePath.split(/[\\/]/).pop() || filePath;
+    this.documentState.title = this.documentTitle || baseName.replace(/\.tok$/i, '');
+
+    const docRoot = documentStateToDocumentRoot(this.documentState);
+
+    if (win.tokIpc?.saveDocument) {
+      try {
+        await win.tokIpc.saveDocument({ document: docRoot, filePath });
+        this.currentFilePath = filePath;
+        this.documentTitle = baseName;
+        this.topBar.setDocumentTitle(baseName);
+        addRecentProject({
+          name: baseName,
+          path: filePath,
+          pages: this.pages.length || 1,
+          lastSavedAt: new Date().toISOString()
+        });
+        this.showToast(t('toastSaved'));
+        return true;
+      } catch (err: any) {
+        console.error('[TOK] Failed to save document:', err);
+        this.showToast(tf('toastSaveError', { error: err?.message ?? String(err) }), true);
+        return false;
+      }
+    } else {
+      this.currentFilePath = filePath;
+      this.documentTitle = baseName;
+      this.topBar.setDocumentTitle(baseName);
+      addRecentProject({
+        name: baseName,
+        path: filePath,
+        pages: this.pages.length || 1,
+        lastSavedAt: new Date().toISOString()
+      });
+      this.showToast(t('toastSaved'));
+      return true;
+    }
+  }
+
+  private openProjectFile(filePath: string): void {
+    const win = window as any;
+    const baseName = filePath.split(/[\\/]/).pop() || filePath;
+
+    if (win.tokIpc?.openDocument) {
+      win.tokIpc.openDocument(filePath)
+        .then((docRoot: any) => {
+          const newState = documentRootToDocumentState(docRoot);
+          this.documentState = newState;
+          this.currentFilePath = filePath;
+          const displayTitle = docRoot.metadata?.title || baseName;
+          this.documentTitle = displayTitle;
+          this.topBar.setDocumentTitle(displayTitle);
+
+          const activeKey = this.activeFlowId || (newState.templateType === 'prose' ? 'gemara' : 'gemara');
+          this.activeFlowId = activeKey;
+          const activeStory = newState.flows[activeKey] || [];
+          this.storyEditor.loadStory(activeStory);
+
+          const newPages = FlowPaginator.paginateDocument(this.documentState);
+          this.pages = newPages;
+          this.canvas.setPages(newPages, 0);
+          this.refreshThumbnails();
+          this.updatePageStats(0);
+
+          this.hasOpenDocument = true;
+          this.welcomeModal.setHasOpenDocument(true);
+          addRecentProject({
+            name: displayTitle,
+            path: filePath,
+            pages: this.pages.length || 1,
+            lastSavedAt: new Date().toISOString()
+          });
+          this.showToast(tf('toastOpenFile', { path: displayTitle }));
+        })
+        .catch((err: any) => {
+          console.error('[TOK] Failed to open document:', err);
+          this.showToast(tf('toastOpenError', { error: err?.message ?? String(err) }), true);
+        });
+      return;
+    }
+
     this.documentTitle = baseName;
     this.topBar.setDocumentTitle(baseName);
+    this.currentFilePath = filePath;
     if (this.pages.length === 0) {
       this.pages = [{
         pageIndex: 0,
@@ -1158,43 +1247,27 @@ export class TypesetOkApp {
         break;
       }
       case 'save-document': {
-        const nowIso = new Date().toISOString();
-        addRecentProject({
-          name: this.documentTitle,
-          pages: this.pages.length || 1,
-          lastSavedAt: nowIso
-        });
-        this.showToast(t('toastSaved'));
+        if (this.currentFilePath) {
+          this.saveDocumentToFile(this.currentFilePath);
+        } else {
+          this.handleSystemAction('save-as');
+        }
         break;
       }
       case 'save-as': {
         const win = window as any;
-        const nowIso = new Date().toISOString();
+        const defaultName = (this.documentTitle || 'document').replace(/\.tok$/i, '') + '.tok';
         if (win.tokIpc?.showSaveDialog) {
           win.tokIpc.showSaveDialog({
-            defaultPath: this.documentTitle,
+            defaultPath: defaultName,
             filters: [{ name: 'TypesetOK Document', extensions: ['tok'] }]
           }).then((filePath: string | null) => {
             if (filePath) {
-              const baseName = filePath.split(/[\\/]/).pop() || filePath;
-              this.documentTitle = baseName;
-              this.topBar.setDocumentTitle(baseName);
-              addRecentProject({
-                name: baseName,
-                path: filePath,
-                pages: this.pages.length || 1,
-                lastSavedAt: nowIso
-              });
-              this.showToast(t('toastSaved'));
+              this.saveDocumentToFile(filePath);
             }
           });
         } else {
-          addRecentProject({
-            name: this.documentTitle,
-            pages: this.pages.length || 1,
-            lastSavedAt: nowIso
-          });
-          this.showToast(t('toastSaved'));
+          this.saveDocumentToFile(defaultName);
         }
         break;
       }
