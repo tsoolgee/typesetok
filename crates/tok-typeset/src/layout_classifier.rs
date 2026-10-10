@@ -1,7 +1,62 @@
-//! Deterministic Document Layout Classifier.
+//! Deterministic Document Layout Classifier and Topology Synthesizer.
 //!
-//! Analyzes document structural features and constraints to classify the appropriate
-//! layout topology family, prioritizing explicit declarations before structural heuristics.
+//! This module implements the deterministic classification engine responsible for mapping
+//! raw document structural features and constraint profiles into concrete [`LayoutFamily`]
+//! specifications.
+//!
+//! # Architecture & Precedence Hierarchy
+//!
+//! The classification pipeline evaluates layout topologies according to a strict deterministic
+//! precedence hierarchy:
+//!
+//! 1. **Explicit Layout Hint (`Confidence::Explicit`):**
+//!    User or document metadata declarations (`SectionNode.layout_kind`, `SectionNode.page_style`)
+//!    take absolute precedence over structural heuristics. If an unrecognized hint is supplied,
+//!    a diagnostic warning is emitted and the classifier gracefully falls back to structural analysis.
+//!
+//! 2. **Single-Flow Prose (`Confidence::StrongStructural`):**
+//!    Triggered when total flow count is $\le 1$, or when only one active flow exists without
+//!    spine-relative roles, footnotes, or explicit width proportions. Synthesizes a continuous,
+//!    single-column reading surface.
+//!
+//! 3. **Footnote Band Layout (`Confidence::StrongStructural`):**
+//!    Triggered when a document has exactly one primary text flow accompanied by a dedicated
+//!    bottom-anchored footnote flow (`FlowType::Footnote` or `role = "bottom_band"`). Synthesizes
+//!    a top primary frame with a floating footnote band.
+//!
+//! 4. **Tzurat HaDaf / Classical Jewish Layout (`Confidence::StrongStructural`):**
+//!    Triggered when spine-relative roles exist (`inner_spine`, `outer_margin`), or when a 3-stream
+//!    corpus with a primary candidate is detected, provided non-footnote flows $\le 3$.
+//!    - **Central Corpus:** Placed in the center column (nominal 40% width).
+//!    - **Inner Spine Commentary:** Placed adjacent to the binding spine (Recto = left, Verso = right).
+//!    - **Outer Margin Commentary:** Placed along the outer edge (Recto = right, Verso = left).
+//!    - **Expansion Stream:** Prioritizes `explicit_expansion_flow_id` > inner spine > outer margin
+//!      to honor traditional Hebrew typography where the inner commentary wraps beneath the main text.
+//!
+//! 5. **Parallel Multi-Column Corpi (`Confidence::StrongStructural` / `Disambiguated`):**
+//!    Triggered when $\ge 2$ text streams are present without spine-relative topology, or when
+//!    $\ge 4$ non-footnote streams are declared (e.g. Mikraot Gedolot with Torah, Onkelos, Rashi, Ramban).
+//!    Synthesizes proportional or equal vertical column divisions across the printable spread.
+//!
+//! 6. **Custom Constraints / Fallback (`Confidence::Fallback`):**
+//!    When structural indicators are asymmetric or partial, synthesizes a flexible multi-stream
+//!    layout preserving all declared flows without dropping textual content.
+//!
+//! # Disambiguation Rules
+//!
+//! - **Arbitrary Flow Naming Independence:**
+//!   The classifier never relies on hardcoded string matching (such as `"gemara"`, `"rashi"`, `"tosafot"`)
+//!   for layout decisions. Any arbitrary flow identifier (e.g., `"source_text"`, `"latin_translation"`,
+//!   `"critical_apparatus"`) is fully supported via structural properties and `placement_role`.
+//!
+//! - **4-Stream Corpus vs. Tzurat HaDaf Disambiguation:**
+//!   Tzurat HaDaf accommodates at most 3 column flows (primary, inner spine, outer margin) plus an optional
+//!   bottom footnote band. When a document defines 4 or more column flows (e.g. Mikraot Gedolot),
+//!   it is disambiguated into `LayoutFamily::ParallelColumns` to guarantee zero dropped flows.
+//!
+//! - **L-Shaped Expansion Priority:**
+//!   If the primary stream terminates early before the bottom margin, the expansion space is allocated
+//!   to the inner commentary (Rashi) by default, preserving historical Talmudic page geometry.
 
 use crate::layout_family::LayoutFamily;
 use crate::layout_features::DocumentLayoutFeatures;
