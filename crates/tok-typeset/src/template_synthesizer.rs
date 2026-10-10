@@ -491,5 +491,94 @@ mod tests {
             other => panic!("Expected InsufficientPageGeometry, got {:?}", other),
         }
     }
+
+    #[test]
+    fn test_synthesize_tzurat_hadaf_arbitrary_names_and_expansion() {
+        let doc = DocumentRoot::new("תלמוד כללי");
+        let mut sec = SectionNode::new("דף כג", "default");
+        sec.flows.clear();
+        sec.flows.push(Flow::new(FlowId::new("primary_text"), FlowType::Main));
+        sec.flows.push(Flow::new(FlowId::new("spine_comm"), FlowType::CommentA));
+        sec.flows.push(Flow::new(FlowId::new("outer_comm"), FlowType::CommentB));
+
+        let family = LayoutFamily::TzuratHaDaf {
+            primary_flow: FlowId::new("primary_text"),
+            spine_inner_flow: Some(FlowId::new("spine_comm")),
+            spine_outer_flow: Some(FlowId::new("outer_comm")),
+            expansion_flow: Some(FlowId::new("outer_comm")),
+            has_bottom_band: false,
+        };
+
+        let template = TemplateSynthesizer::synthesize(&doc, &sec, &family, 595.0, 842.0, 80.0, 72.0)
+            .expect("Synthesis must succeed");
+
+        assert_eq!(template.flow_specs.len(), 3);
+        assert_eq!(template.flow_specs[0].role, FlowPlacementRole::Primary);
+        assert_eq!(template.flow_specs[1].role, FlowPlacementRole::InnerSpine);
+        assert_eq!(template.flow_specs[2].role, FlowPlacementRole::OuterMargin);
+
+        assert!(template.has_l_shape_expansion);
+        assert_eq!(template.expansion_flow_id, Some(FlowId::new("outer_comm")));
+        assert!(!template.has_bottom_band);
+
+        let sum: f32 = template.nominal_proportions.iter().sum();
+        assert!((sum - 1.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn test_synthesize_tzurat_hadaf_with_bottom_band() {
+        let doc = DocumentRoot::new("תלמוד עם הערות");
+        let mut sec = SectionNode::new("דף כד", "default");
+        sec.flows.clear();
+        sec.flows.push(Flow::new(FlowId::new("core"), FlowType::Main));
+        sec.flows.push(Flow::new(FlowId::new("inner"), FlowType::CommentA));
+        sec.flows.push(Flow::new(FlowId::new("outer"), FlowType::CommentB));
+        sec.flows.push(Flow::new(FlowId::new("bottom_notes"), FlowType::Footnote));
+
+        let family = LayoutFamily::TzuratHaDaf {
+            primary_flow: FlowId::new("core"),
+            spine_inner_flow: Some(FlowId::new("inner")),
+            spine_outer_flow: Some(FlowId::new("outer")),
+            expansion_flow: Some(FlowId::new("outer")),
+            has_bottom_band: true,
+        };
+
+        let template = TemplateSynthesizer::synthesize(&doc, &sec, &family, 595.0, 842.0, 80.0, 72.0)
+            .expect("Synthesis must succeed");
+
+        assert_eq!(template.flow_specs.len(), 4);
+        assert_eq!(template.column_count(), 3);
+        assert!(template.has_bottom_band);
+        assert_eq!(template.footnote_flow_id, Some(FlowId::new("bottom_notes")));
+
+        let fn_spec = template.flow_specs.iter().find(|s| s.role == FlowPlacementRole::BottomBand);
+        assert!(fn_spec.is_some());
+        assert_eq!(fn_spec.unwrap().flow_id.0, "bottom_notes");
+    }
+
+    #[test]
+    fn test_synthesize_footnotes_band_layout() {
+        let doc = DocumentRoot::new("מחקר עם הערות");
+        let mut sec = SectionNode::new("פרק א", "default");
+        sec.flows.clear();
+        sec.flows.push(Flow::new(FlowId::new("body_text"), FlowType::Main));
+        sec.flows.push(Flow::new(FlowId::new("footnotes"), FlowType::Footnote));
+
+        let family = LayoutFamily::FootnotesBand {
+            primary_flow: FlowId::new("body_text"),
+            footnote_flow: FlowId::new("footnotes"),
+            column_flows: vec![FlowId::new("body_text")],
+        };
+
+        let template = TemplateSynthesizer::synthesize(&doc, &sec, &family, 595.0, 842.0, 80.0, 72.0)
+            .expect("Synthesis must succeed");
+
+        assert_eq!(template.flow_specs.len(), 2);
+        assert_eq!(template.column_count(), 1);
+        assert_eq!(template.nominal_proportions, vec![1.0]);
+        assert_eq!(template.footnote_flow_id, Some(FlowId::new("footnotes")));
+        assert!(template.has_bottom_band);
+        assert!(!template.has_l_shape_expansion);
+    }
 }
 
