@@ -1786,7 +1786,165 @@ describe('Phase 4: Real Rust Typesetting Engine Connection (typeset-document & t
       if (fs.existsSync(tempOutJson)) fs.unlinkSync(tempOutJson);
     }
   });
+
+  test('Integration: Editing document content dynamically updates Rust layout results and line counts', async () => {
+    assert.ok(tokCliPath, 'tok-cli binary must be available');
+    const { spawn } = await import('node:child_process');
+    const os = await import('node:os');
+    const bridgeModule = await import('../packages/tok-ui/dist/engine/documentBridge.js');
+    const { documentStateToDocumentRoot } = bridgeModule;
+
+    // Phase A: Initial document with short text
+    const initialDocState = {
+      title: 'עריכה דינמית',
+      templateType: 'prose',
+      flows: {
+        gemara: [
+          {
+            id: 'para-1',
+            styleId: 'style-gemara-main',
+            text: 'פסקה ראשונה קצרה ביותר.'
+          }
+        ],
+        rashi: [],
+        tosafot: [],
+        notes: []
+      }
+    };
+
+    const tempIn1 = path.join(os.tmpdir(), `edit_in1_${Date.now()}.json`);
+    const tempOut1 = path.join(os.tmpdir(), `edit_out1_${Date.now()}.json`);
+    let pages1;
+
+    try {
+      fs.writeFileSync(tempIn1, JSON.stringify(documentStateToDocumentRoot(initialDocState), null, 2), 'utf-8');
+      await new Promise((resolve) => {
+        const proc = spawn(tokCliPath, ['typeset-document', tempIn1, tempOut1], { windowsHide: true });
+        proc.on('close', resolve);
+      });
+      pages1 = JSON.parse(fs.readFileSync(tempOut1, 'utf-8'));
+    } finally {
+      if (fs.existsSync(tempIn1)) fs.unlinkSync(tempIn1);
+      if (fs.existsSync(tempOut1)) fs.unlinkSync(tempOut1);
+    }
+
+    const desc1 = layoutToPageDescriptors(pages1);
+    const lineCount1 = pages1.reduce((sum, p) => sum + p.frames.reduce((s, f) => s + f.lines.length, 0), 0);
+    assert.equal(desc1.length, 1, 'Initial short text should fit in 1 page');
+    assert.equal(lineCount1, 1, 'Initial text should produce 1 line');
+
+    // Phase B: Content edited: user adds extensive multi-paragraph text
+    const longHebrewParagraphs = Array.from({ length: 45 }, (_, i) => ({
+      id: `para-extended-${i}`,
+      styleId: 'style-gemara-main',
+      text: `פסקה מספר ${i + 1}: מאימתי קורין את שמע בערבית משעה שהכהנים נכנסים לאכול בתרומתן עד סוף האשמורה הראשונה דברי רבי אליעזר וחכמים אומרים עד חצות רבן גמליאל אומר עד שיעלה עמוד השחר מעשה ובאו בניו מבית המשתה אמרו לו לא קרינו את שמע אמר להם אם לא עלה עמוד השחר חייבין אתם לקרות.`
+    }));
+
+    const editedDocState = {
+      title: 'עריכה דינמית',
+      templateType: 'prose',
+      flows: {
+        gemara: longHebrewParagraphs,
+        rashi: [],
+        tosafot: [],
+        notes: []
+      }
+    };
+
+    const tempIn2 = path.join(os.tmpdir(), `edit_in2_${Date.now()}.json`);
+    const tempOut2 = path.join(os.tmpdir(), `edit_out2_${Date.now()}.json`);
+    let pages2;
+
+    try {
+      fs.writeFileSync(tempIn2, JSON.stringify(documentStateToDocumentRoot(editedDocState), null, 2), 'utf-8');
+      await new Promise((resolve) => {
+        const proc = spawn(tokCliPath, ['typeset-document', tempIn2, tempOut2], { windowsHide: true });
+        proc.on('close', resolve);
+      });
+      pages2 = JSON.parse(fs.readFileSync(tempOut2, 'utf-8'));
+    } finally {
+      if (fs.existsSync(tempIn2)) fs.unlinkSync(tempIn2);
+      if (fs.existsSync(tempOut2)) fs.unlinkSync(tempOut2);
+    }
+
+    const desc2 = layoutToPageDescriptors(pages2);
+    const lineCount2 = pages2.reduce((sum, p) => sum + p.frames.reduce((s, f) => s + f.lines.length, 0), 0);
+
+    // Verify layout expanded according to real Rust typography and page breaking
+    assert.ok(lineCount2 > lineCount1, `Line count must expand after adding content (${lineCount2} > ${lineCount1})`);
+    assert.ok(desc2.length > 1, `Document must paginate into multiple pages (${desc2.length} > 1)`);
+    assert.equal(desc2[0].gematriaNumber, 'א׳');
+    assert.equal(desc2[1].gematriaNumber, 'ב׳');
+  });
+
+  test('Integration: Hebrew Niqqud, Taamim and multi-flow Talmud co-pagination geometry', async () => {
+    assert.ok(tokCliPath, 'tok-cli binary must be available');
+    const { spawn } = await import('node:child_process');
+    const os = await import('node:os');
+    const bridgeModule = await import('../packages/tok-ui/dist/engine/documentBridge.js');
+    const { documentStateToDocumentRoot } = bridgeModule;
+
+    const niqqudText = 'בְּרֵאשִׁית בָּרָא אֱלֹהִים אֵת הַשָּׁמַיִם וְאֵת הָאָרֶץ׃';
+    const talmudDocState = {
+      title: 'תלמוד מסכת ברכות',
+      templateType: 'gemara',
+      flows: {
+        gemara: [
+          {
+            id: 'g1',
+            styleId: 'style-gemara-main',
+            text: niqqudText
+          }
+        ],
+        rashi: [
+          {
+            id: 'r1',
+            styleId: 'style-rashi-comm',
+            text: 'רש"י: פירש רש"י על אתר בלשון קצרה.'
+          }
+        ],
+        tosafot: [
+          {
+            id: 't1',
+            styleId: 'style-tosafot-comm',
+            text: 'תוספות: ותימא מאי שנא הכא.'
+          }
+        ],
+        notes: []
+      }
+    };
+
+    const tempIn = path.join(os.tmpdir(), `talmud_in_${Date.now()}.json`);
+    const tempOut = path.join(os.tmpdir(), `talmud_out_${Date.now()}.json`);
+
+    try {
+      fs.writeFileSync(tempIn, JSON.stringify(documentStateToDocumentRoot(talmudDocState), null, 2), 'utf-8');
+      const exitCode = await new Promise((resolve) => {
+        const proc = spawn(tokCliPath, ['typeset-document', tempIn, tempOut], { windowsHide: true });
+        proc.on('close', resolve);
+      });
+
+      assert.equal(exitCode, 0);
+      const pages = JSON.parse(fs.readFileSync(tempOut, 'utf-8'));
+      const descriptors = layoutToPageDescriptors(pages);
+
+      assert.ok(descriptors.length >= 1);
+      const firstHtml = descriptors[0].htmlContent;
+
+      // Verify that all 3 flows have distinct interactive frames
+      assert.ok(firstHtml.includes('data-flow-id="gemara"') || firstHtml.includes('data-flow-id="main"'), 'Must have Gemara frame');
+      assert.ok(firstHtml.includes('data-flow-id="rashi"'), 'Must have Rashi frame');
+      assert.ok(firstHtml.includes('data-flow-id="tosafot"'), 'Must have Tosafot frame');
+
+      // Verify that Niqqud is preserved in the rendered layout
+      assert.ok(firstHtml.includes('בְּרֵאשִׁית'), 'Niqqud must be preserved in rendered HTML line');
+    } finally {
+      if (fs.existsSync(tempIn)) fs.unlinkSync(tempIn);
+      if (fs.existsSync(tempOut)) fs.unlinkSync(tempOut);
+    }
+  });
 });
+
 
 
 
