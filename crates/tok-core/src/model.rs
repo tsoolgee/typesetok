@@ -58,6 +58,10 @@ pub struct Flow {
     pub id: FlowId,
     pub flow_type: FlowType,
     pub paragraphs: Vec<ParagraphNode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width_ratio: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placement_role: Option<String>,
 }
 
 impl Flow {
@@ -66,7 +70,19 @@ impl Flow {
             id,
             flow_type,
             paragraphs: Vec::new(),
+            width_ratio: None,
+            placement_role: None,
         }
+    }
+
+    pub fn with_width_ratio(mut self, ratio: f32) -> Self {
+        self.width_ratio = Some(ratio);
+        self
+    }
+
+    pub fn with_placement_role(mut self, role: impl Into<String>) -> Self {
+        self.placement_role = Some(role.into());
+        self
     }
 
     pub fn add_paragraph(&mut self, p: ParagraphNode) {
@@ -88,6 +104,12 @@ pub struct SectionNode {
     pub name: String,
     pub page_style: String,
     pub flows: Vec<Flow>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layout_kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub column_proportions: Option<Vec<f32>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expansion_flow_id: Option<FlowId>,
 }
 
 impl SectionNode {
@@ -98,7 +120,25 @@ impl SectionNode {
             name: name.into(),
             page_style: page_style.into(),
             flows: vec![main_flow],
+            layout_kind: None,
+            column_proportions: None,
+            expansion_flow_id: None,
         }
+    }
+
+    pub fn with_layout_kind(mut self, kind: impl Into<String>) -> Self {
+        self.layout_kind = Some(kind.into());
+        self
+    }
+
+    pub fn with_column_proportions(mut self, proportions: Vec<f32>) -> Self {
+        self.column_proportions = Some(proportions);
+        self
+    }
+
+    pub fn with_expansion_flow_id(mut self, id: FlowId) -> Self {
+        self.expansion_flow_id = Some(id);
+        self
     }
 
     pub fn main_flow_mut(&mut self) -> Option<&mut Flow> {
