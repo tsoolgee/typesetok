@@ -1,4 +1,4 @@
-import { test, describe } from 'node:test';
+import { test, describe, before } from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -1150,7 +1150,7 @@ describe('Phase 1 & 2: Data Contract (documentState <-> DocumentModel) & Real PD
 
     // Convert back to UI state
     const restoredState = documentBridge.documentRootToDocumentState(docRoot);
-    assert.equal(restoredState.title, 'ספר תלמוד מסכת ברכות.tok');
+    assert.equal(restoredState.title, 'ספר תלמוד מסכת ברכות');
     assert.equal(restoredState.templateType, 'gemara');
     assert.equal(restoredState.flows.gemara.length, 2);
     assert.equal(restoredState.flows.rashi.length, 1);
@@ -1179,7 +1179,7 @@ describe('Phase 1 & 2: Data Contract (documentState <-> DocumentModel) & Real PD
     assert.equal(docRoot.sections[0].flows[0].paragraphs.length, 0);
 
     const restored = documentBridge.documentRootToDocumentState(docRoot);
-    assert.equal(restored.title, 'מסמך ריק.tok');
+    assert.equal(restored.title, 'מסמך ריק');
     assert.equal(restored.flows.gemara.length, 0);
   });
 
@@ -1434,6 +1434,183 @@ describe('Phase 1 & 2: Data Contract (documentState <-> DocumentModel) & Real PD
       assert.ok(stats.size > 2000, 'Demo PDF must be > 2000 bytes');
     } finally {
       if (fs.existsSync(tempPdfPath)) fs.unlinkSync(tempPdfPath);
+    }
+  });
+});
+
+describe('Phase 3: Real .tok Storage (Save, Open, Round-Trip & Error Resilience)', () => {
+  const isWindows = process.platform === 'win32';
+  const tokCliBinary = isWindows ? 'tok-cli.exe' : 'tok-cli';
+  const customTargetCli = path.join(
+    process.env.LOCALAPPDATA || path.join(process.env.USERPROFILE || '', 'AppData', 'Local'),
+    'tok_target',
+    'debug',
+    tokCliBinary
+  );
+  const repoTargetCli = path.resolve('target', 'debug', tokCliBinary);
+  const tokCliPath = fs.existsSync(customTargetCli) ? customTargetCli : repoTargetCli;
+
+  let documentBridge;
+  before(async () => {
+    const bridgePath = path.resolve('packages/tok-ui/dist/engine/documentBridge.js');
+    assert.ok(fs.existsSync(bridgePath), 'documentBridge.js must be built');
+    documentBridge = await import(`file://${bridgePath.replace(/\\/g, '/')}`);
+  });
+
+  test('Round-Trip: Save and open multi-flow Hebrew document with Niqqud via .tok package', async () => {
+    const { spawn } = await import('node:child_process');
+    const os = await import('node:os');
+
+    const multiFlowState = {
+      title: 'מסכת פסחים - מהדורת בדיקה 2026',
+      templateType: 'gemara',
+      flows: {
+        gemara: [
+          { id: 'g-1', styleId: 'style-gemara-main', text: 'כָּל שָׁעָה שֶׁמֻּתָּר לֶאֱכֹל, מַאֲכִיל לַבְּהֵמָה וְלַחַיָּה וְלָעוֹפוֹת, וּמוֹכְרוֹ לְנָכְרִי, וּמֻתָּר בַּהֲנָאָתוֹ.' },
+          { id: 'g-2', styleId: 'style-gemara-main', text: 'עָבַר זְמַנּוֹ, אָסוּר בַּהֲנָאָתוֹ, וְלֹא יַסִּיק בּוֹ תַּנּוּר וְכִירַיִם. רַבִּי יְהוּדָה אוֹמֵר: אֵין בִּעוּר חָמֵץ אֶלָּא שְׂרֵפָה.' }
+        ],
+        rashi: [
+          { id: 'r-1', styleId: 'style-rashi-body', text: 'כל שעה שמותר לאכול - כל ארבע שעות.' },
+          { id: 'r-2', styleId: 'style-rashi-body', text: 'מאכיל לבהמה - ואף על פי שהיא רובצת לפניו.' }
+        ],
+        tosafot: [
+          { id: 't-1', styleId: 'style-tosafot-body', text: 'כל שעה שמותר לאכול - ואם תאמר והא תנן לקמן כל שעה שאינו אוכל מאכיל.' }
+        ],
+        notes: [
+          { id: 'n-1', styleId: 'style-footnotes', text: 'הערת שוליים ראשונה על פירוש רש\"י.' }
+        ]
+      }
+    };
+
+    const docRoot = documentBridge.documentStateToDocumentRoot(multiFlowState);
+    const tempInJson = path.join(os.tmpdir(), `tok_save_in_${Date.now()}.json`);
+    const tempTokPath = path.join(os.tmpdir(), `tok_save_pkg_${Date.now()}.tok`);
+    const tempOutJson = path.join(os.tmpdir(), `tok_open_out_${Date.now()}.json`);
+
+    try {
+      fs.writeFileSync(tempInJson, JSON.stringify(docRoot, null, 2), 'utf-8');
+
+      // 1. Execute CLI save-package
+      const saveResult = await new Promise((resolve, reject) => {
+        const proc = spawn(tokCliPath, ['save-package', tempInJson, tempTokPath], { windowsHide: true });
+        let stdout = '';
+        let stderr = '';
+        proc.stdout?.on('data', (d) => (stdout += d.toString()));
+        proc.stderr?.on('data', (d) => (stderr += d.toString()));
+        proc.on('error', reject);
+        proc.on('close', (code) => resolve({ code, stdout, stderr }));
+      });
+
+      assert.equal(saveResult.code, 0, `save-package failed: ${saveResult.stderr || saveResult.stdout}`);
+      assert.ok(fs.existsSync(tempTokPath), '.tok package must exist on disk');
+      const tokStats = fs.statSync(tempTokPath);
+      assert.ok(tokStats.size > 500, `.tok package size must be substantial, got ${tokStats.size}`);
+
+      // 2. Execute CLI inspect-package to verify manifest
+      const inspectResult = await new Promise((resolve, reject) => {
+        const proc = spawn(tokCliPath, ['inspect-package', tempTokPath], { windowsHide: true });
+        let stdout = '';
+        let stderr = '';
+        proc.stdout?.on('data', (d) => (stdout += d.toString()));
+        proc.stderr?.on('data', (d) => (stderr += d.toString()));
+        proc.on('error', reject);
+        proc.on('close', (code) => resolve({ code, stdout, stderr }));
+      });
+
+      assert.equal(inspectResult.code, 0, `inspect-package failed: ${inspectResult.stderr}`);
+      assert.ok(inspectResult.stdout.includes(multiFlowState.title), 'inspect-package must report correct title');
+
+      // 3. Execute CLI open-package
+      const openResult = await new Promise((resolve, reject) => {
+        const proc = spawn(tokCliPath, ['open-package', tempTokPath, tempOutJson], { windowsHide: true });
+        let stdout = '';
+        let stderr = '';
+        proc.stdout?.on('data', (d) => (stdout += d.toString()));
+        proc.stderr?.on('data', (d) => (stderr += d.toString()));
+        proc.on('error', reject);
+        proc.on('close', (code) => resolve({ code, stdout, stderr }));
+      });
+
+      assert.equal(openResult.code, 0, `open-package failed: ${openResult.stderr || openResult.stdout}`);
+      assert.ok(fs.existsSync(tempOutJson), 'Extracted document JSON must exist on disk');
+
+      // 4. Verify roundtripped state matches original model exactly
+      const extractedRoot = JSON.parse(fs.readFileSync(tempOutJson, 'utf-8'));
+      const restoredState = documentBridge.documentRootToDocumentState(extractedRoot);
+
+      assert.equal(restoredState.title, multiFlowState.title, 'Title must round-trip exactly');
+      assert.equal(restoredState.templateType, multiFlowState.templateType, 'Template type must round-trip');
+
+      assert.equal(restoredState.flows.gemara.length, 2, 'Gemara paragraphs count must match');
+      assert.equal(restoredState.flows.rashi.length, 2, 'Rashi paragraphs count must match');
+      assert.equal(restoredState.flows.tosafot.length, 1, 'Tosafot paragraphs count must match');
+      assert.equal(restoredState.flows.notes.length, 1, 'Notes paragraphs count must match');
+
+      assert.ok(restoredState.flows.gemara[0].text.includes('שָׁעָה שֶׁמֻּתָּר לֶאֱכֹל'));
+      assert.ok(restoredState.flows.gemara[1].text.includes('רַבִּי יְהוּדָה'));
+      assert.ok(restoredState.flows.rashi[0].text.includes('כל שעה שמותר לאכול'));
+      assert.ok(restoredState.flows.tosafot[0].text.includes('ואם תאמר והא תנן'));
+      assert.ok(restoredState.flows.notes[0].text.includes('הערת שוליים ראשונה'));
+    } finally {
+      if (fs.existsSync(tempInJson)) fs.unlinkSync(tempInJson);
+      if (fs.existsSync(tempTokPath)) fs.unlinkSync(tempTokPath);
+      if (fs.existsSync(tempOutJson)) fs.unlinkSync(tempOutJson);
+    }
+  });
+
+  test('Error Handling: Corrupted or invalid .tok file is rejected without creating output', async () => {
+    const { spawn } = await import('node:child_process');
+    const os = await import('node:os');
+
+    const corruptTokPath = path.join(os.tmpdir(), `corrupt_pkg_${Date.now()}.tok`);
+    const tempOutJson = path.join(os.tmpdir(), `should_not_exist_${Date.now()}.json`);
+
+    try {
+      fs.writeFileSync(corruptTokPath, Buffer.from('NOT_A_VALID_ZIP_HEADER_GARBAGE_BYTES_12345'), 'utf-8');
+
+      const openResult = await new Promise((resolve) => {
+        const proc = spawn(tokCliPath, ['open-package', corruptTokPath, tempOutJson], { windowsHide: true });
+        let stdout = '';
+        let stderr = '';
+        proc.stdout?.on('data', (d) => (stdout += d.toString()));
+        proc.stderr?.on('data', (d) => (stderr += d.toString()));
+        proc.on('close', (code) => resolve({ code, stdout, stderr }));
+      });
+
+      assert.notEqual(openResult.code, 0, 'CLI must exit with non-zero on corrupted .tok package');
+      assert.equal(fs.existsSync(tempOutJson), false, 'Output JSON must NOT be created on failure');
+    } finally {
+      if (fs.existsSync(corruptTokPath)) fs.unlinkSync(corruptTokPath);
+      if (fs.existsSync(tempOutJson)) fs.unlinkSync(tempOutJson);
+    }
+  });
+
+  test('Atomic Resilience: Existing file is not destroyed if saving invalid document fails', async () => {
+    const { spawn } = await import('node:child_process');
+    const os = await import('node:os');
+
+    const existingTokPath = path.join(os.tmpdir(), `atomic_existing_${Date.now()}.tok`);
+    const nonExistentJson = path.join(os.tmpdir(), `missing_${Date.now()}.json`);
+
+    try {
+      const initialContent = Buffer.from('ORIGINAL_INTACT_CONTENT_BEFORE_FAILED_SAVE');
+      fs.writeFileSync(existingTokPath, initialContent);
+
+      const saveResult = await new Promise((resolve) => {
+        const proc = spawn(tokCliPath, ['save-package', nonExistentJson, existingTokPath], { windowsHide: true });
+        let stdout = '';
+        let stderr = '';
+        proc.stdout?.on('data', (d) => (stdout += d.toString()));
+        proc.stderr?.on('data', (d) => (stderr += d.toString()));
+        proc.on('close', (code) => resolve({ code, stdout, stderr }));
+      });
+
+      assert.notEqual(saveResult.code, 0, 'Must fail when input is missing');
+      assert.ok(fs.existsSync(existingTokPath), 'Existing file must still exist');
+      const survivingContent = fs.readFileSync(existingTokPath);
+      assert.deepEqual(survivingContent, initialContent, 'Existing file must not be modified or truncated');
+    } finally {
+      if (fs.existsSync(existingTokPath)) fs.unlinkSync(existingTokPath);
     }
   });
 });
