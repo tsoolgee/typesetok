@@ -8,6 +8,41 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, '..');
 
+// ── tok-cli engine binary (used by the Phase 1-6 integration suites) ──
+// The Rust CLI is built by cargo, not by `npm run build`, so CI must run
+// `cargo build -p tok-cli` before `npm test`. TOK_CLI_PATH overrides the search.
+const TOK_CLI_EXE = process.platform === 'win32' ? 'tok-cli.exe' : 'tok-cli';
+
+function tokCliCandidates() {
+  if (process.env.TOK_CLI_PATH) return [path.resolve(process.env.TOK_CLI_PATH)];
+  const targetDirs = [];
+  for (const dir of [process.env.CARGO_TARGET_DIR, process.env.CARGO_BUILD_TARGET_DIR]) {
+    if (dir) targetDirs.push(path.resolve(rootDir, dir));
+  }
+  if (process.env.LOCALAPPDATA) targetDirs.push(path.join(process.env.LOCALAPPDATA, 'tok_target'));
+  targetDirs.push(path.join(rootDir, 'target'), path.join(rootDir, 'crates', 'target'));
+  const candidates = [];
+  for (const dir of targetDirs) {
+    for (const profile of ['debug', 'release']) candidates.push(path.join(dir, profile, TOK_CLI_EXE));
+  }
+  return [...new Set(candidates)];
+}
+
+// Returns the most recently built tok-cli binary, or undefined if none exists,
+// so a stale debug/release build never shadows a fresh one.
+function findTokCli() {
+  const found = tokCliCandidates().filter((p) => fs.existsSync(p));
+  found.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
+  return found[0];
+}
+
+function tokCliMissingMessage() {
+  return (
+    'tok-cli binary not found. Build it first with `cargo build -p tok-cli` ' +
+    `(or set TOK_CLI_PATH). Checked: ${tokCliCandidates().join(', ')}`
+  );
+}
+
 describe('Hebrew Typography & Gematria Engine', () => {
   function toHebrewGematria(num) {
     if (num <= 0) return '';
@@ -1184,20 +1219,12 @@ describe('Phase 1 & 2: Data Contract (documentState <-> DocumentModel) & Real PD
   });
 
   test('Locate tok-cli engine binary', () => {
-    const isWin = process.platform === 'win32';
-    const exe = isWin ? 'tok-cli.exe' : 'tok-cli';
-    const candidates = [
-      process.env.TOK_CLI_PATH,
-      path.join(process.env.LOCALAPPDATA || '', 'tok_target', 'debug', exe),
-      path.join(process.env.LOCALAPPDATA || '', 'tok_target', 'release', exe),
-      path.join(rootDir, 'target', 'debug', exe),
-      path.join(rootDir, 'target', 'release', exe)
-    ];
-    tokCliPath = candidates.find((p) => p && fs.existsSync(p));
-    assert.ok(tokCliPath, `tok-cli binary must be found. Checked: ${candidates.filter(Boolean).join(', ')}`);
+    tokCliPath = findTokCli();
+    assert.ok(tokCliPath, tokCliMissingMessage());
   });
 
   test('Integration: Export real user document with unique marker text to PDF', async () => {
+    assert.ok(tokCliPath, tokCliMissingMessage());
     const { spawn } = await import('node:child_process');
     const os = await import('node:os');
 
@@ -1305,6 +1332,7 @@ describe('Phase 1 & 2: Data Contract (documentState <-> DocumentModel) & Real PD
   });
 
   test('Integration: Export empty document produces valid PDF without crashing', async () => {
+    assert.ok(tokCliPath, tokCliMissingMessage());
     const { spawn } = await import('node:child_process');
     const os = await import('node:os');
 
@@ -1343,6 +1371,7 @@ describe('Phase 1 & 2: Data Contract (documentState <-> DocumentModel) & Real PD
   });
 
   test('Integration: Multi-paragraph document with Hebrew Niqqud exports correctly', async () => {
+    assert.ok(tokCliPath, tokCliMissingMessage());
     const { spawn } = await import('node:child_process');
     const os = await import('node:os');
 
@@ -1392,6 +1421,7 @@ describe('Phase 1 & 2: Data Contract (documentState <-> DocumentModel) & Real PD
   });
 
   test('Error Handling: Non-existent input or corrupted document fails and reports error', async () => {
+    assert.ok(tokCliPath, tokCliMissingMessage());
     const { spawn } = await import('node:child_process');
     const os = await import('node:os');
 
@@ -1412,6 +1442,7 @@ describe('Phase 1 & 2: Data Contract (documentState <-> DocumentModel) & Real PD
   });
 
   test('Backward Compatibility: --demo flag still functions as expected', async () => {
+    assert.ok(tokCliPath, tokCliMissingMessage());
     const { spawn } = await import('node:child_process');
     const os = await import('node:os');
 
@@ -1439,16 +1470,7 @@ describe('Phase 1 & 2: Data Contract (documentState <-> DocumentModel) & Real PD
 });
 
 describe('Phase 3: Real .tok Storage (Save, Open, Round-Trip & Error Resilience)', () => {
-  const isWindows = process.platform === 'win32';
-  const tokCliBinary = isWindows ? 'tok-cli.exe' : 'tok-cli';
-  const customTargetCli = path.join(
-    process.env.LOCALAPPDATA || path.join(process.env.USERPROFILE || '', 'AppData', 'Local'),
-    'tok_target',
-    'debug',
-    tokCliBinary
-  );
-  const repoTargetCli = path.resolve('target', 'debug', tokCliBinary);
-  const tokCliPath = fs.existsSync(customTargetCli) ? customTargetCli : repoTargetCli;
+  const tokCliPath = findTokCli();
 
   let documentBridge;
   before(async () => {
@@ -1458,6 +1480,7 @@ describe('Phase 3: Real .tok Storage (Save, Open, Round-Trip & Error Resilience)
   });
 
   test('Round-Trip: Save and open multi-flow Hebrew document with Niqqud via .tok package', async () => {
+    assert.ok(tokCliPath, tokCliMissingMessage());
     const { spawn } = await import('node:child_process');
     const os = await import('node:os');
 
@@ -1559,6 +1582,7 @@ describe('Phase 3: Real .tok Storage (Save, Open, Round-Trip & Error Resilience)
   });
 
   test('Error Handling: Corrupted or invalid .tok file is rejected without creating output', async () => {
+    assert.ok(tokCliPath, tokCliMissingMessage());
     const { spawn } = await import('node:child_process');
     const os = await import('node:os');
 
@@ -1586,6 +1610,7 @@ describe('Phase 3: Real .tok Storage (Save, Open, Round-Trip & Error Resilience)
   });
 
   test('Atomic Resilience: Existing file is not destroyed if saving invalid document fails', async () => {
+    assert.ok(tokCliPath, tokCliMissingMessage());
     const { spawn } = await import('node:child_process');
     const os = await import('node:os');
 
@@ -1623,20 +1648,7 @@ describe('Phase 4: Real Rust Typesetting Engine Connection (typeset-document & t
     const bridgeModule = await import('../packages/tok-ui/dist/engine/typesetBridge.js');
     layoutToPageDescriptors = bridgeModule.layoutToPageDescriptors;
 
-    const candidates = [
-      path.resolve(rootDir, 'crates/target/release/tok-cli.exe'),
-      path.resolve(rootDir, 'crates/target/debug/tok-cli.exe'),
-      path.resolve(rootDir, 'target/release/tok-cli.exe'),
-      path.resolve(rootDir, 'target/debug/tok-cli.exe'),
-      path.join(process.env.LOCALAPPDATA || '', 'tok_target/debug/tok-cli.exe'),
-      path.join(process.env.LOCALAPPDATA || '', 'tok_target/release/tok-cli.exe')
-    ];
-    for (const c of candidates) {
-      if (fs.existsSync(c)) {
-        tokCliPath = c;
-        break;
-      }
-    }
+    tokCliPath = findTokCli();
   });
 
   test('Bridge: layoutToPageDescriptors translates Rust PageLayoutBox into SpreadCanvas PageDescriptor', () => {
@@ -1723,7 +1735,7 @@ describe('Phase 4: Real Rust Typesetting Engine Connection (typeset-document & t
   });
 
   test('CLI: tok-cli typeset-document emits valid PageLayoutBox JSON array with Hebrew lines', async () => {
-    assert.ok(tokCliPath, 'tok-cli binary must be available');
+    assert.ok(tokCliPath, tokCliMissingMessage());
     const { spawn } = await import('node:child_process');
     const os = await import('node:os');
     const bridgeModule = await import('../packages/tok-ui/dist/engine/documentBridge.js');
@@ -1788,7 +1800,7 @@ describe('Phase 4: Real Rust Typesetting Engine Connection (typeset-document & t
   });
 
   test('Integration: Editing document content dynamically updates Rust layout results and line counts', async () => {
-    assert.ok(tokCliPath, 'tok-cli binary must be available');
+    assert.ok(tokCliPath, tokCliMissingMessage());
     const { spawn } = await import('node:child_process');
     const os = await import('node:os');
     const bridgeModule = await import('../packages/tok-ui/dist/engine/documentBridge.js');
@@ -1878,7 +1890,7 @@ describe('Phase 4: Real Rust Typesetting Engine Connection (typeset-document & t
   });
 
   test('Integration: Hebrew Niqqud, Taamim and multi-flow Talmud co-pagination geometry', async () => {
-    assert.ok(tokCliPath, 'tok-cli binary must be available');
+    assert.ok(tokCliPath, tokCliMissingMessage());
     const { spawn } = await import('node:child_process');
     const os = await import('node:os');
     const bridgeModule = await import('../packages/tok-ui/dist/engine/documentBridge.js');
@@ -1945,7 +1957,7 @@ describe('Phase 4: Real Rust Typesetting Engine Connection (typeset-document & t
   });
 
   test('CLI MultiFlow: 2-flow dual-stream document typesets with proportional columns via tok-cli', async () => {
-    assert.ok(tokCliPath, 'tok-cli binary must be available');
+    assert.ok(tokCliPath, tokCliMissingMessage());
     const { spawn } = await import('node:child_process');
     const os = await import('node:os');
 
@@ -2031,7 +2043,7 @@ describe('Phase 4: Real Rust Typesetting Engine Connection (typeset-document & t
   });
 
   test('CLI MultiFlow: 4-flow Mikraot Gedolot document typesets with 4 distinct column frames via tok-cli', async () => {
-    assert.ok(tokCliPath, 'tok-cli binary must be available');
+    assert.ok(tokCliPath, tokCliMissingMessage());
     const { spawn } = await import('node:child_process');
     const os = await import('node:os');
 
@@ -2116,7 +2128,7 @@ describe('Phase 4: Real Rust Typesetting Engine Connection (typeset-document & t
   });
 
   test('Integration: Live multi-flow editing, content continuity, and Tzurat HaDaf HTML layout in UI', async () => {
-    assert.ok(tokCliPath, 'tok-cli binary must be available');
+    assert.ok(tokCliPath, tokCliMissingMessage());
     const { spawn } = await import('node:child_process');
     const os = await import('node:os');
     const bridgeModule = await import('../packages/tok-ui/dist/engine/documentBridge.js');
@@ -2238,24 +2250,11 @@ describe('Phase 6: Document Classification & Layout Template Synthesis', () => {
   let tokCliPath;
 
   before(() => {
-    const candidates = [
-      path.resolve(rootDir, 'crates/target/release/tok-cli.exe'),
-      path.resolve(rootDir, 'crates/target/debug/tok-cli.exe'),
-      path.resolve(rootDir, 'target/release/tok-cli.exe'),
-      path.resolve(rootDir, 'target/debug/tok-cli.exe'),
-      path.join(process.env.LOCALAPPDATA || '', 'tok_target/debug/tok-cli.exe'),
-      path.join(process.env.LOCALAPPDATA || '', 'tok_target/release/tok-cli.exe')
-    ];
-    for (const c of candidates) {
-      if (fs.existsSync(c)) {
-        tokCliPath = c;
-        break;
-      }
-    }
+    tokCliPath = findTokCli();
   });
 
   test('CLI: Auto-classification of unfamiliar flow names into ParallelColumns with equal proportions', async () => {
-    assert.ok(tokCliPath, 'tok-cli binary must be available');
+    assert.ok(tokCliPath, tokCliMissingMessage());
     const { spawn } = await import('node:child_process');
     const os = await import('node:os');
 
@@ -2321,7 +2320,7 @@ describe('Phase 6: Document Classification & Layout Template Synthesis', () => {
   });
 
   test('CLI: Explicit layout_kind and column_proportions overrides structural heuristics', async () => {
-    assert.ok(tokCliPath, 'tok-cli binary must be available');
+    assert.ok(tokCliPath, tokCliMissingMessage());
     const { spawn } = await import('node:child_process');
     const os = await import('node:os');
 
@@ -2391,7 +2390,7 @@ describe('Phase 6: Document Classification & Layout Template Synthesis', () => {
   });
 
   test('CLI: Auto-classification of spine-relative commentary into TzuratHaDaf with custom stream names', async () => {
-    assert.ok(tokCliPath, 'tok-cli binary must be available');
+    assert.ok(tokCliPath, tokCliMissingMessage());
     const { spawn } = await import('node:child_process');
     const os = await import('node:os');
 
