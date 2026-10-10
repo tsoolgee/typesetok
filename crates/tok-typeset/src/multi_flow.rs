@@ -176,10 +176,29 @@ impl MultiFlowSolver {
     ///   Inner margin = Left (Rashi), Outer margin = Right (Tosafot).
     /// - Verso (Left page): Spine is on the RIGHT.
     ///   Inner margin = Right (Rashi), Outer margin = Left (Tosafot).
-    ///
-    /// Widths and heights are never negative, and the columns plus gutters
-    /// always fit in the content width.
     pub fn solve_talmud_spread(
+        page_width_pt: f32,
+        page_height_pt: f32,
+        margin_inner_pt: f32,
+        margin_outer_pt: f32,
+        margin_y_pt: f32,
+        flows: &[FlowGeometrySpec],
+        side: SpreadSide,
+    ) -> Vec<SolvedFlowAllocation> {
+        Self::solve_generic_spread(
+            page_width_pt,
+            page_height_pt,
+            margin_inner_pt,
+            margin_outer_pt,
+            margin_y_pt,
+            flows,
+            side,
+        )
+    }
+
+    /// Solves layout allocation across a spread for an arbitrary number of flows (1, 2, 3, 4, N)
+    /// using constraint specifications, roles, and width ratios.
+    pub fn solve_generic_spread(
         page_width_pt: f32,
         page_height_pt: f32,
         margin_inner_pt: f32,
@@ -209,35 +228,126 @@ impl MultiFlowSolver {
         }
 
         let gutter = Self::gutter_for(content_width);
-        let available_cols_width = content_width - 2.0 * gutter;
+        let num_cols = flows.len();
+        let total_gutters = (num_cols - 1) as f32 * gutter;
+        let available_cols_width = non_negative(content_width - total_gutters);
 
-        let rashi_width = available_cols_width * 0.28;
-        let main_width = available_cols_width * 0.40;
-        let tosafot_width = available_cols_width * 0.32;
+        // Check if flows specify custom width ratios
+        let has_custom_ratios = flows.iter().any(|f| f.width_ratio.is_some());
+        if has_custom_ratios {
+            let total_ratio: f32 = flows
+                .iter()
+                .map(|f| f.width_ratio.unwrap_or(1.0 / num_cols as f32))
+                .sum();
+            let norm_factor = if total_ratio > 0.0 {
+                1.0 / total_ratio
+            } else {
+                1.0
+            };
 
-        // On Verso (Left page): [Tosafot (Left)] [Gutter] [Gemara (Center)] [Gutter] [Rashi (Right)]
-        // On Recto (Right page): [Rashi (Left)] [Gutter] [Gemara (Center)] [Gutter] [Tosafot (Right)]
-        let (left_w, right_w) = match side {
-            SpreadSide::Verso => (tosafot_width, rashi_width),
-            SpreadSide::Recto => (rashi_width, tosafot_width),
-        };
-        let x_left = margin_left;
-        let x_center = x_left + left_w + gutter;
-        let x_right = x_center + main_width + gutter;
+            let mut allocations = Vec::new();
+            let mut current_x = margin_left;
+            for f in flows {
+                let ratio = f.width_ratio.unwrap_or(1.0 / num_cols as f32) * norm_factor;
+                let col_w = available_cols_width * ratio;
+                allocations.push(alloc(&f.flow_id, current_x, col_w));
+                current_x += col_w + gutter;
+            }
+            return allocations;
+        }
 
-        flows
-            .iter()
-            .map(|f| {
-                let (x, w) = match (FlowRole::of(f), side) {
-                    (FlowRole::Main, _) => (x_center, main_width),
-                    (FlowRole::Rashi, SpreadSide::Recto)
-                    | (FlowRole::Tosafot, SpreadSide::Verso) => (x_left, left_w),
-                    (FlowRole::Rashi, SpreadSide::Verso)
-                    | (FlowRole::Tosafot, SpreadSide::Recto) => (x_right, right_w),
-                };
-                alloc(&f.flow_id, x, w)
-            })
-            .collect()
+        // Standard 2-stream: (Primary 60%, Secondary 40%)
+        if num_cols == 2 {
+            let primary_idx = flows
+                .iter()
+                .position(|f| f.role == FlowPlacementRole::Primary || f.priority == 1)
+                .unwrap_or(0);
+            let secondary_idx = if primary_idx == 0 { 1 } else { 0 };
+
+            let primary_w = available_cols_width * 0.60;
+            let secondary_w = available_cols_width * 0.40;
+
+            let is_inner_secondary = flows[secondary_idx].role == FlowPlacementRole::InnerSpine
+                || flows[secondary_idx].priority == 2;
+            let (left_idx, left_w, right_idx, right_w) = match (side, is_inner_secondary) {
+                (SpreadSide::Recto, true) | (SpreadSide::Verso, false) => {
+                    (secondary_idx, secondary_w, primary_idx, primary_w)
+                }
+                _ => (primary_idx, primary_w, secondary_idx, secondary_w),
+            };
+
+            let x_left = margin_left;
+            let x_right = x_left + left_w + gutter;
+
+            let mut result = vec![
+                alloc(&flows[0].flow_id, 0.0, 0.0),
+                alloc(&flows[1].flow_id, 0.0, 0.0),
+            ];
+            result[left_idx] = alloc(&flows[left_idx].flow_id, x_left, left_w);
+            result[right_idx] = alloc(&flows[right_idx].flow_id, x_right, right_w);
+            return result;
+        }
+
+        // Standard 3-stream: Talmud layout (Main 40%, Inner 28%, Outer 32%)
+        if num_cols == 3 {
+            let rashi_width = available_cols_width * 0.28;
+            let main_width = available_cols_width * 0.40;
+            let tosafot_width = available_cols_width * 0.32;
+
+            let (left_w, right_w) = match side {
+                SpreadSide::Verso => (tosafot_width, rashi_width),
+                SpreadSide::Recto => (rashi_width, tosafot_width),
+            };
+            let x_left = margin_left;
+            let x_center = x_left + left_w + gutter;
+            let x_right = x_center + main_width + gutter;
+
+            return flows
+                .iter()
+                .map(|f| {
+                    let (x, w) = match (FlowRole::of(f), side) {
+                        (FlowRole::Main, _) => (x_center, main_width),
+                        (FlowRole::Rashi, SpreadSide::Recto)
+                        | (FlowRole::Tosafot, SpreadSide::Verso) => (x_left, left_w),
+                        (FlowRole::Rashi, SpreadSide::Verso)
+                        | (FlowRole::Tosafot, SpreadSide::Recto) => (x_right, right_w),
+                    };
+                    alloc(&f.flow_id, x, w)
+                })
+                .collect();
+        }
+
+        // 4-stream: Mikraot Gedolot / 4 columns (Primary 36%, Inner 24%, Outer1 22%, Outer2 18%)
+        if num_cols == 4 {
+            let primary_w = available_cols_width * 0.36;
+            let inner_w = available_cols_width * 0.24;
+            let outer1_w = available_cols_width * 0.22;
+            let outer2_w = available_cols_width * 0.18;
+
+            let widths = match side {
+                SpreadSide::Recto => [inner_w, primary_w, outer1_w, outer2_w],
+                SpreadSide::Verso => [outer2_w, outer1_w, primary_w, inner_w],
+            };
+
+            let mut allocations = Vec::new();
+            let mut curr_x = margin_left;
+            for (i, f) in flows.iter().enumerate() {
+                let w = widths[i];
+                allocations.push(alloc(&f.flow_id, curr_x, w));
+                curr_x += w + gutter;
+            }
+            return allocations;
+        }
+
+        // Generic N columns (>= 5): distribute evenly across available width
+        let col_w = available_cols_width / num_cols as f32;
+        let mut allocations = Vec::new();
+        let mut curr_x = margin_left;
+        for f in flows {
+            allocations.push(alloc(&f.flow_id, curr_x, col_w));
+            curr_x += col_w + gutter;
+        }
+        allocations
     }
 
     /// Solves dynamic Talmud layout with L-shaped commentary expansion below Gemara
