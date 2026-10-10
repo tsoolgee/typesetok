@@ -246,6 +246,18 @@ impl TemplateSynthesizer {
             }
         }
 
+        // Normalize vertical column proportions so they sum to exactly 1.0
+        let total_prop: f32 = proportions.iter().sum();
+        let norm_factor = if total_prop > 0.0 && total_prop.is_finite() {
+            1.0 / total_prop
+        } else {
+            1.0
+        };
+        for (i, p) in proportions.iter_mut().enumerate() {
+            *p *= norm_factor;
+            specs[i].width_ratio = Some(*p);
+        }
+
         // Add footnote band if present
         if has_bottom_band {
             let note_flow = section
@@ -256,7 +268,7 @@ impl TemplateSynthesizer {
                 .unwrap_or_else(|| FlowId::new("notes"));
 
             if !specs.iter().any(|s| s.flow_id == note_flow) {
-                let note_spec = FlowGeometrySpec::new(note_flow.clone(), 4)
+                let note_spec = FlowGeometrySpec::new(note_flow.clone(), (specs.len() + 1) as u8)
                     .with_role(FlowPlacementRole::BottomBand);
                 specs.push(note_spec);
                 template.footnote_flow_id = Some(note_flow);
@@ -310,6 +322,18 @@ impl TemplateSynthesizer {
                 specs.push(spec);
                 proportions.push(ratio);
             }
+        }
+
+        // Normalize proportions
+        let total_p: f32 = proportions.iter().sum();
+        let norm_f = if total_p > 0.0 && total_p.is_finite() {
+            1.0 / total_p
+        } else {
+            1.0
+        };
+        for (i, p) in proportions.iter_mut().enumerate() {
+            *p *= norm_f;
+            specs[i].width_ratio = Some(*p);
         }
 
         let fn_spec = FlowGeometrySpec::new(footnote_flow.clone(), (specs.len() + 1) as u8)
