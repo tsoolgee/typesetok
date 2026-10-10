@@ -90,11 +90,21 @@ export function layoutToPageDescriptors(pages: PageLayoutBox[]): PageDescriptor[
     const pageWidth = pageBox.dimensions?.width || 595.28;
     const pageHeight = pageBox.dimensions?.height || 841.89;
 
-    // Content area in points (default A4 with 42.5pt inner/top margins)
-    const marginInner = 42.5;
-    const marginTop = 42.5;
-    const contentWidthPt = Math.max(1, pageWidth - 2 * marginInner);
-    const contentHeightPt = Math.max(1, pageHeight - 2 * marginTop);
+    // Content area in points - calculated dynamically from frame bounds or page margins
+    const hasFrames = Array.isArray(pageBox.frames) && pageBox.frames.length > 0;
+    const minFrameX = hasFrames ? Math.min(...pageBox.frames.map((f) => f.rect.x)) : 42.5;
+    const minFrameY = hasFrames ? Math.min(...pageBox.frames.map((f) => f.rect.y)) : 42.5;
+    const maxFrameRight = hasFrames
+      ? Math.max(...pageBox.frames.map((f) => f.rect.x + f.rect.width))
+      : (pageWidth - minFrameX);
+    const maxFrameBottom = hasFrames
+      ? Math.max(...pageBox.frames.map((f) => f.rect.y + f.rect.height))
+      : (pageHeight - minFrameY);
+
+    const marginInner = Math.max(0, minFrameX);
+    const marginTop = Math.max(0, minFrameY);
+    const contentWidthPt = Math.max(1, maxFrameRight - marginInner);
+    const contentHeightPt = Math.max(1, maxFrameBottom - marginTop);
 
     // SpreadCanvas sheet content box: 404px width, 577px height
     const TARGET_CONTENT_W = 404;
@@ -114,18 +124,26 @@ export function layoutToPageDescriptors(pages: PageLayoutBox[]): PageDescriptor[
       const flowId = frame.flow_id || 'gemara';
       const frameId = frame.frame_id || `frame_${pageIndex}_${flowId}`;
 
-      const flowClass = flowId === 'gemara' || flowId === 'main'
-        ? 'tok-frame-gemara'
-        : flowId === 'notes'
-        ? 'tok-frame-notes'
-        : 'tok-frame-comm';
+      const isExpansion = flowId.endsWith('_expansion');
+      const baseFlowId = isExpansion ? flowId.replace(/_expansion$/, '') : flowId;
+
+      let flowClass = 'tok-frame-comm';
+      if (baseFlowId === 'gemara' || baseFlowId === 'main' || baseFlowId === 'primary') {
+        flowClass = 'tok-frame-gemara';
+      } else if (baseFlowId === 'notes' || baseFlowId === 'footnote' || baseFlowId === 'heorot') {
+        flowClass = 'tok-frame-notes';
+      } else if (isExpansion) {
+        flowClass = 'tok-frame-comm tok-frame-expansion tok-frame-l-shape';
+      }
+
+      const isPrimary = baseFlowId === 'gemara' || baseFlowId === 'main' || baseFlowId === 'primary';
 
       const linesHtml = (frame.lines || []).map((line) => {
         const lineTopPx = Math.max(0, (line.baseline_y - line.height * 0.8) * scaleY);
         const lineH = Math.max(10, line.height * scaleY);
         const fontFam = (line.fonts && line.fonts.length > 0)
           ? line.fonts[0]
-          : (flowId === 'gemara' || flowId === 'main' ? 'var(--tok-font-hebrew-body)' : 'var(--tok-font-hebrew-rashi)');
+          : (isPrimary ? 'var(--tok-font-hebrew-body)' : 'var(--tok-font-hebrew-rashi)');
         const paraAttr = line.paragraph_id ? ` data-para-id="${escapeHtml(String(line.paragraph_id))}"` : '';
 
         return `<div class="tok-line-box" data-line-index="${line.line_index}"${paraAttr} data-baseline-y="${line.baseline_y}" style="position: absolute; top: ${lineTopPx.toFixed(1)}px; left: 0; right: 0; height: ${lineH.toFixed(1)}px; line-height: ${lineH.toFixed(1)}px; font-family: ${fontFam}; direction: ${line.is_rtl ? 'rtl' : 'ltr'}; text-align: justify; overflow: hidden; white-space: pre-wrap;">${escapeHtml(line.text)}</div>`;
@@ -139,6 +157,8 @@ export function layoutToPageDescriptors(pages: PageLayoutBox[]): PageDescriptor[
         <div class="tok-interactive-frame tok-frame-rust ${flowClass}"
              data-frame-id="${escapeHtml(frameId)}"
              data-flow-id="${escapeHtml(flowId)}"
+             data-base-flow-id="${escapeHtml(baseFlowId)}"
+             data-is-expansion="${isExpansion ? 'true' : 'false'}"
              data-rect-x="${frame.rect.x}"
              data-rect-y="${frame.rect.y}"
              data-rect-w="${frame.rect.width}"
