@@ -369,3 +369,103 @@ impl TemplateSynthesizer {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tok_core::model::{Flow, FlowType, SectionNode};
+
+    #[test]
+    fn test_synthesize_single_flow() {
+        let doc = DocumentRoot::new("מסמך יחיד");
+        let mut sec = SectionNode::new("שער א", "default");
+        sec.flows.clear();
+        sec.flows.push(Flow::new(FlowId::new("prose_body"), FlowType::Main));
+
+        let family = LayoutFamily::SingleFlow {
+            flow_id: FlowId::new("prose_body"),
+        };
+
+        let template = TemplateSynthesizer::synthesize(&doc, &sec, &family, 595.0, 842.0, 80.0, 72.0)
+            .expect("Synthesis must succeed");
+
+        assert_eq!(template.flow_specs.len(), 1);
+        assert_eq!(template.flow_specs[0].flow_id.0, "prose_body");
+        assert_eq!(template.flow_specs[0].role, FlowPlacementRole::Primary);
+        assert_eq!(template.nominal_proportions, vec![1.0]);
+        assert!(!template.has_l_shape_expansion);
+        assert!(!template.has_bottom_band);
+    }
+
+    #[test]
+    fn test_synthesize_parallel_columns_equal() {
+        let doc = DocumentRoot::new("מקבילים");
+        let mut sec = SectionNode::new("תרגום", "default");
+        sec.flows.clear();
+        sec.flows.push(Flow::new(FlowId::new("lang_a"), FlowType::Main));
+        sec.flows.push(Flow::new(FlowId::new("lang_b"), FlowType::Main));
+
+        let family = LayoutFamily::ParallelColumns {
+            column_count: 2,
+            proportions: None,
+            flow_ids: vec![FlowId::new("lang_a"), FlowId::new("lang_b")],
+        };
+
+        let template = TemplateSynthesizer::synthesize(&doc, &sec, &family, 595.0, 842.0, 80.0, 72.0)
+            .expect("Synthesis must succeed");
+
+        assert_eq!(template.flow_specs.len(), 2);
+        assert_eq!(template.nominal_proportions, vec![0.5, 0.5]);
+        assert_eq!(template.flow_specs[0].role, FlowPlacementRole::Column(0));
+        assert_eq!(template.flow_specs[1].role, FlowPlacementRole::Column(1));
+    }
+
+    #[test]
+    fn test_synthesize_parallel_columns_four_mikraot() {
+        let doc = DocumentRoot::new("מקראות גדולות");
+        let mut sec = SectionNode::new("בראשית", "default");
+        sec.flows.clear();
+        sec.flows.push(Flow::new(FlowId::new("torah"), FlowType::Main));
+        sec.flows.push(Flow::new(FlowId::new("onkelos"), FlowType::CommentA));
+        sec.flows.push(Flow::new(FlowId::new("rashi"), FlowType::CommentB));
+        sec.flows.push(Flow::new(FlowId::new("ramban"), FlowType::CommentB));
+
+        let family = LayoutFamily::ParallelColumns {
+            column_count: 4,
+            proportions: Some(vec![0.40, 0.20, 0.20, 0.20]),
+            flow_ids: vec![
+                FlowId::new("torah"),
+                FlowId::new("onkelos"),
+                FlowId::new("rashi"),
+                FlowId::new("ramban"),
+            ],
+        };
+
+        let template = TemplateSynthesizer::synthesize(&doc, &sec, &family, 595.0, 842.0, 80.0, 72.0)
+            .expect("Synthesis must succeed");
+
+        assert_eq!(template.flow_specs.len(), 4);
+        assert_eq!(template.column_count(), 4);
+        let sum: f32 = template.nominal_proportions.iter().sum();
+        assert!((sum - 1.0).abs() < 1e-4);
+        assert_eq!(template.flow_specs[0].width_ratio, Some(0.40));
+    }
+
+    #[test]
+    fn test_synthesize_fails_on_impossible_dimensions() {
+        let doc = DocumentRoot::new("שגיאת ממדים");
+        let sec = SectionNode::new("שגיאה", "default");
+        let family = LayoutFamily::SingleFlow { flow_id: FlowId::main() };
+
+        // Margin (600pt) exceeds page width (500pt)
+        let err = TemplateSynthesizer::synthesize(&doc, &sec, &family, 500.0, 842.0, 600.0, 72.0);
+        assert!(err.is_err());
+        match err {
+            Err(TemplateConstraintError::InsufficientPageGeometry { printable_width_pt, .. }) => {
+                assert!(printable_width_pt < 0.0);
+            }
+            other => panic!("Expected InsufficientPageGeometry, got {:?}", other),
+        }
+    }
+}
+
