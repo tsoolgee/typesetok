@@ -26,6 +26,7 @@ import {
   DEFAULT_PROSE_FLOWS,
   TemplateType
 } from './engine/FlowPaginator';
+import { documentStateToDocumentRoot } from './engine/documentBridge';
 
 import { toHebrewGematria } from './gematria';
 export { toHebrewGematria };
@@ -635,15 +636,22 @@ export class TypesetOkApp {
     });
   }
 
-  /** Runs the export with the options chosen in the dialog (same tok-cli path as before). */
+  /** Runs the export with the options chosen in the dialog. */
   private runExport(options: ExportOptions): void {
     const win = window as any;
     if (win.tokIpc) {
       this.showToast(t('toastExporting'));
-      // The CLI currently renders its built-in sample document and takes only an
-      // output path; the other options are recorded for when the engine accepts them.
-      console.log('[TOK] Export options:', options);
-      win.tokIpc.renderPdf('--demo', options.fileName)
+      // Sync active story editor changes to documentState
+      if (this.storyEditor && this.activeFlowId) {
+        this.documentState.flows[this.activeFlowId] = this.storyEditor.getStory();
+      }
+      this.documentState.title = this.documentTitle || this.documentState.title;
+
+      // Convert documentState to Rust DocumentRoot model format
+      const docRoot = documentStateToDocumentRoot(this.documentState);
+      console.log('[TOK] Exporting real document to PDF:', { title: docRoot.metadata.title, options });
+
+      win.tokIpc.renderPdf({ document: docRoot, outputPath: options.fileName })
         .then(() => {
           this.showToast(t('toastExportDone'));
         })

@@ -3,8 +3,8 @@ import { contextBridge, ipcRenderer } from 'electron';
 export interface TokIpcBridge {
   sendCommand: (cmd: unknown) => Promise<unknown>;
   onEvent: (callback: (event: unknown) => void) => () => void;
-  renderPdf: (inputPath: string, outputPath: string) => Promise<string>;
-  renderHtml: (inputPath: string, outputPath: string) => Promise<string>;
+  renderPdf: (input: string | { inputPath?: string; document?: unknown; outputPath?: string }, outputPath?: string) => Promise<string>;
+  renderHtml: (input: string | { inputPath?: string; document?: unknown; outputPath?: string }, outputPath?: string) => Promise<string>;
 
   // Logger
   getRecentLogs: () => Promise<string[]>;
@@ -49,11 +49,17 @@ const tokIpc: TokIpcBridge = {
       ipcRenderer.removeListener('menu:action', menuHandler);
     };
   },
-  renderPdf: async (inputPath: string, outputPath: string) => {
-    return await ipcRenderer.invoke('tok:render-pdf', { inputPath, outputPath });
+  renderPdf: async (input: string | { inputPath?: string; document?: unknown; outputPath?: string }, outputPath?: string) => {
+    const payload = typeof input === 'string'
+      ? { inputPath: input, outputPath }
+      : { ...input, outputPath: outputPath || input?.outputPath };
+    return await ipcRenderer.invoke('tok:render-pdf', payload);
   },
-  renderHtml: async (inputPath: string, outputPath: string) => {
-    return await ipcRenderer.invoke('tok:render-html', { inputPath, outputPath });
+  renderHtml: async (input: string | { inputPath?: string; document?: unknown; outputPath?: string }, outputPath?: string) => {
+    const payload = typeof input === 'string'
+      ? { inputPath: input, outputPath }
+      : { ...input, outputPath: outputPath || input?.outputPath };
+    return await ipcRenderer.invoke('tok:render-html', payload);
   },
 
   // Logger APIs

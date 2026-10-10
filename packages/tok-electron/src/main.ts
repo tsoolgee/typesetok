@@ -424,12 +424,52 @@ handle('tok:send-command', async (_, cmd: any) => {
 });
 
 async function renderWithCli(kind: 'pdf' | 'html', payload: any): Promise<string> {
-  const inputPath = requireString(payload?.inputPath, 'inputPath');
-  const outputPath = requireString(payload?.outputPath, 'outputPath');
-  const { code, stdout, stderr } = await runCli([`render-${kind}`, inputPath, outputPath]);
-  if (code !== 0) throw new Error(`tok-cli failed with code ${code}: ${stderr}`);
-  if (kind === 'pdf') logger.info(`[IPC] PDF rendering succeeded to: ${outputPath}`);
-  return stdout;
+  const rawOutputPath = requireString(payload?.outputPath, 'outputPath');
+  const outputPath = path.isAbsolute(rawOutputPath) ? rawOutputPath : path.resolve(rawOutputPath);
+
+  let inputPath = typeof payload?.inputPath === 'string' && payload.inputPath ? payload.inputPath : null;
+  let tempDocFile: string | null = null;
+
+  try {
+    if (payload?.document) {
+      const tempDir = app.getPath('temp');
+      const uniqueSuffix = `${Date.now()}_${process.pid}_${Math.random().toString(36).slice(2, 9)}`;
+      tempDocFile = path.join(tempDir, `tok_doc_${uniqueSuffix}.json`);
+      const content = typeof payload.document === 'string'
+        ? payload.document
+        : JSON.stringify(payload.document, null, 2);
+      await fs.promises.writeFile(tempDocFile, content, 'utf-8');
+      inputPath = tempDocFile;
+    }
+
+    if (!inputPath) {
+      throw new Error('Either inputPath or document must be provided for rendering');
+    }
+
+    const { code, stdout, stderr } = await runCli([`render-${kind}`, inputPath, outputPath]);
+    if (code !== 0) {
+      throw new Error(`tok-cli failed with code ${code}: ${stderr || stdout}`);
+    }
+
+    if (!fs.existsSync(outputPath)) {
+      throw new Error(`Export failed: output file was not created at ${outputPath}`);
+    }
+
+    if (kind === 'pdf') {
+      logger.info(`[IPC] PDF rendering succeeded to: ${outputPath}`);
+    }
+    return stdout;
+  } finally {
+    if (tempDocFile) {
+      try {
+        if (fs.existsSync(tempDocFile)) {
+          await fs.promises.unlink(tempDocFile);
+        }
+      } catch (err: any) {
+        logger.warn(`[IPC] Failed to remove temp document file: ${tempDocFile}`, { error: err?.message });
+      }
+    }
+  }
 }
 
 handle('tok:render-pdf', (_, payload) => renderWithCli('pdf', payload));
