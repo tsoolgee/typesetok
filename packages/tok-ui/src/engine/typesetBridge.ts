@@ -7,7 +7,7 @@
  */
 
 import { PageDescriptor } from 'tok-viewer';
-import { toHebrewGematria } from '../gematria';
+import { toHebrewGematria } from '../gematria.js';
 
 export interface PhysicalPoint {
   x: number;

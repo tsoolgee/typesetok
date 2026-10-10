@@ -1615,4 +1615,178 @@ describe('Phase 3: Real .tok Storage (Save, Open, Round-Trip & Error Resilience)
   });
 });
 
+describe('Phase 4: Real Rust Typesetting Engine Connection (typeset-document & typesetBridge)', () => {
+  let layoutToPageDescriptors;
+  let tokCliPath;
+
+  before(async () => {
+    const bridgeModule = await import('../packages/tok-ui/dist/engine/typesetBridge.js');
+    layoutToPageDescriptors = bridgeModule.layoutToPageDescriptors;
+
+    const candidates = [
+      path.resolve(rootDir, 'crates/target/release/tok-cli.exe'),
+      path.resolve(rootDir, 'crates/target/debug/tok-cli.exe'),
+      path.resolve(rootDir, 'target/release/tok-cli.exe'),
+      path.resolve(rootDir, 'target/debug/tok-cli.exe'),
+      path.join(process.env.LOCALAPPDATA || '', 'tok_target/debug/tok-cli.exe'),
+      path.join(process.env.LOCALAPPDATA || '', 'tok_target/release/tok-cli.exe')
+    ];
+    for (const c of candidates) {
+      if (fs.existsSync(c)) {
+        tokCliPath = c;
+        break;
+      }
+    }
+  });
+
+  test('Bridge: layoutToPageDescriptors translates Rust PageLayoutBox into SpreadCanvas PageDescriptor', () => {
+    assert.ok(typeof layoutToPageDescriptors === 'function', 'layoutToPageDescriptors must be exported');
+
+    const sampleRustBoxes = [
+      {
+        page_index: 0,
+        page_number_gematria: 'א׳',
+        dimensions: { x: 0, y: 0, width: 595.28, height: 841.89 },
+        frames: [
+          {
+            frame_id: 'frame_1_gemara',
+            flow_id: 'gemara',
+            rect: { x: 42.5, y: 42.5, width: 510.28, height: 756.89 },
+            lines: [
+              {
+                line_index: 0,
+                paragraph_id: 'para-marker-101',
+                baseline_y: 18.0,
+                height: 14.0,
+                width: 510.28,
+                glyphs: [],
+                text: 'מאימתי קורין את שמע בערבית משעה שהכהנים נכנסין',
+                is_rtl: true,
+                fonts: ['Frank Ruhl Libre']
+              },
+              {
+                line_index: 1,
+                paragraph_id: 'para-marker-101',
+                baseline_y: 36.0,
+                height: 14.0,
+                width: 510.28,
+                glyphs: [],
+                text: 'לאכול בתרומתן עד סוף האשמורה הראשונה',
+                is_rtl: true,
+                fonts: ['Frank Ruhl Libre']
+              }
+            ]
+          }
+        ],
+        break_token: null
+      }
+    ];
+
+    const descriptors = layoutToPageDescriptors(sampleRustBoxes);
+    assert.equal(descriptors.length, 1);
+    assert.equal(descriptors[0].pageIndex, 0);
+    assert.equal(descriptors[0].gematriaNumber, 'א׳');
+    assert.equal(descriptors[0].widthPt, 595.28);
+    assert.equal(descriptors[0].heightPt, 841.89);
+
+    const html = descriptors[0].htmlContent;
+    assert.ok(html.includes('tok-page-layout-rust'), 'Must wrap in tok-page-layout-rust');
+    assert.ok(html.includes('data-frame-id="frame_1_gemara"'), 'Must preserve frame id');
+    assert.ok(html.includes('data-flow-id="gemara"'), 'Must preserve flow id');
+    assert.ok(html.includes('data-line-index="0"'), 'Must render line 0');
+    assert.ok(html.includes('data-para-id="para-marker-101"'), 'Must preserve paragraph ID on line');
+    assert.ok(html.includes('data-baseline-y="18"'), 'Must preserve exact baseline Y');
+    assert.ok(html.includes('מאימתי קורין את שמע'), 'Must render exact line text');
+  });
+
+  test('Bridge: layoutToPageDescriptors handles empty document layout box cleanly', () => {
+    const emptyRustBoxes = [
+      {
+        page_index: 0,
+        page_number_gematria: 'א׳',
+        dimensions: { x: 0, y: 0, width: 595.28, height: 841.89 },
+        frames: [
+          {
+            frame_id: 'frame_1_gemara',
+            flow_id: 'gemara',
+            rect: { x: 42.5, y: 42.5, width: 510.28, height: 756.89 },
+            lines: []
+          }
+        ],
+        break_token: null
+      }
+    ];
+
+    const descriptors = layoutToPageDescriptors(emptyRustBoxes);
+    assert.equal(descriptors.length, 1);
+    assert.ok(descriptors[0].htmlContent.includes('[אין טקסט בעמוד זה]'), 'Must render empty text indicator');
+  });
+
+  test('CLI: tok-cli typeset-document emits valid PageLayoutBox JSON array with Hebrew lines', async () => {
+    assert.ok(tokCliPath, 'tok-cli binary must be available');
+    const { spawn } = await import('node:child_process');
+    const os = await import('node:os');
+    const bridgeModule = await import('../packages/tok-ui/dist/engine/documentBridge.js');
+    const { documentStateToDocumentRoot } = bridgeModule;
+
+    const uniqueMarker = `שמע_בערבית_סימן_ייחודי_${Date.now()}`;
+    const testDocState = {
+      title: 'בדיקת עימוד חי',
+      templateType: 'gemara',
+      flows: {
+        gemara: [
+          {
+            id: 'para-uniq-1',
+            styleId: 'style-gemara-main',
+            text: `${uniqueMarker}: מאימתי קורין את שמע בערבית משעה שהכהנים נכנסים לאכול בתרומתן.`
+          }
+        ],
+        rashi: [],
+        tosafot: [],
+        notes: []
+      }
+    };
+
+    const docRoot = documentStateToDocumentRoot(testDocState);
+    const tempInJson = path.join(os.tmpdir(), `typeset_in_${Date.now()}.json`);
+    const tempOutJson = path.join(os.tmpdir(), `typeset_out_${Date.now()}.json`);
+
+    try {
+      fs.writeFileSync(tempInJson, JSON.stringify(docRoot, null, 2), 'utf-8');
+
+      const cliResult = await new Promise((resolve) => {
+        const proc = spawn(tokCliPath, ['typeset-document', tempInJson, tempOutJson], { windowsHide: true });
+        let stdout = '';
+        let stderr = '';
+        proc.stdout?.on('data', (d) => (stdout += d.toString()));
+        proc.stderr?.on('data', (d) => (stderr += d.toString()));
+        proc.on('close', (code) => resolve({ code, stdout, stderr }));
+      });
+
+      assert.equal(cliResult.code, 0, `tok-cli typeset-document failed: ${cliResult.stderr}`);
+      assert.ok(fs.existsSync(tempOutJson), 'Output JSON must be created');
+
+      const rawJson = fs.readFileSync(tempOutJson, 'utf-8');
+      const pages = JSON.parse(rawJson);
+
+      assert.ok(Array.isArray(pages), 'Output must be an array of PageLayoutBox');
+      assert.ok(pages.length >= 1, 'Must produce at least 1 page');
+      assert.equal(pages[0].page_index, 0);
+      assert.ok(pages[0].frames.length >= 1, 'Must have at least 1 frame');
+
+      const allLines = pages[0].frames.flatMap((f) => f.lines);
+      assert.ok(allLines.length >= 1, 'Must have typeset lines');
+      const lineWithMarker = allLines.find((l) => l.text.includes(uniqueMarker));
+      assert.ok(lineWithMarker, 'Must include unique marker text in typeset lines');
+      assert.ok(lineWithMarker.baseline_y > 0, 'Baseline Y must be positive');
+      assert.ok(lineWithMarker.height > 0, 'Line height must be positive');
+      assert.equal(lineWithMarker.is_rtl, true, 'Hebrew line must be RTL');
+    } finally {
+      if (fs.existsSync(tempInJson)) fs.unlinkSync(tempInJson);
+      if (fs.existsSync(tempOutJson)) fs.unlinkSync(tempOutJson);
+    }
+  });
+});
+
+
 
