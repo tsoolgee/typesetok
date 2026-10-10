@@ -23,6 +23,7 @@ USAGE:
 COMMANDS:
     render-pdf <INPUT> <OUTPUT>     Render a .tok, .json, or demo document to ISO PDF/X-1a
     render-html <INPUT> <OUTPUT>    Render a .tok, .json, or demo document to pre-paginated HTML
+    typeset-document <INPUT> <OUT>  Typeset document into PageLayoutBox JSON array
     save-package <INPUT> <OUTPUT>   Save document JSON into an atomic .tok package
     open-package <INPUT> <OUTPUT>   Open and extract a .tok package into document JSON
     benchmark-typeset [--pages N]   Run 1,000-page stress test and cascade latency benchmark
@@ -499,6 +500,26 @@ fn handle_open_package(input: &str, output: &str) -> Result<(), Box<dyn std::err
     Ok(())
 }
 
+fn handle_typeset_document(input: &str, output: &str) -> Result<(), Box<dyn std::error::Error>> {
+    println!("[TOK-CLI] Typesetting document layout to JSON: {}", output);
+    let (doc, _) = load_document_input(input, 1)?;
+
+    let engine = TypesettingEngine::new(TypesettingEngineConfig::default());
+    let pages = engine.typeset_document(doc.root());
+    println!("  - Typeset {} pages with native Rust engine", pages.len());
+
+    if let Some(parent) = Path::new(output).parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)?;
+        }
+    }
+
+    let json_bytes = serde_json::to_vec_pretty(&pages)?;
+    fs::write(output, json_bytes)?;
+    println!("  [SUCCESS] Written PageLayoutBox array to: {}", output);
+    Ok(())
+}
+
 fn main() {
     if let Err(e) = run() {
         eprintln!("Error: {}", e);
@@ -527,6 +548,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 std::process::exit(1);
             }
             handle_render_html(&args[2], &args[3])?;
+        }
+        "typeset-document" => {
+            if args.len() < 4 {
+                eprintln!("Usage: tok-cli typeset-document <INPUT.json | INPUT.tok | --demo> <OUTPUT.json>");
+                std::process::exit(1);
+            }
+            handle_typeset_document(&args[2], &args[3])?;
         }
         "save-package" => {
             if args.len() < 4 {
