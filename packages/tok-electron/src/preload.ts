@@ -24,9 +24,10 @@ export interface TokIpcBridge {
   getPluginSystemStatus: () => Promise<{ isSafeMode: boolean; isSaferActive: boolean; userPluginsDir: string; builtinPluginsDir: string }>;
   setPluginSafeMode: (enabled: boolean) => Promise<boolean>;
 
-  // Document Storage
+  // Document Storage & Typesetting
   saveDocument: (payload: { document: unknown; filePath: string }) => Promise<{ success: boolean; filePath: string }>;
   openDocument: (filePath: string) => Promise<unknown>;
+  typesetDocument: (payload: { document?: unknown; inputPath?: string } | unknown) => Promise<{ success: boolean; pages: any[] }>;
 
   // System & Utilities
   openExternal: (url: string) => Promise<void>;
@@ -108,12 +109,18 @@ const tokIpc: TokIpcBridge = {
     return await ipcRenderer.invoke('tok:set-plugin-safe-mode', enabled);
   },
 
-  // Document Storage
+  // Document Storage & Typesetting
   saveDocument: async (payload: { document: unknown; filePath: string }) => {
     return await ipcRenderer.invoke('tok:save-document', payload);
   },
   openDocument: async (filePath: string) => {
     return await ipcRenderer.invoke('tok:open-document', filePath);
+  },
+  typesetDocument: async (payload: { document?: unknown; inputPath?: string } | unknown) => {
+    const normPayload = (payload && typeof payload === 'object' && ('document' in payload || 'inputPath' in payload))
+      ? payload
+      : { document: payload };
+    return await ipcRenderer.invoke('tok:typeset-document', normPayload);
   },
 
   // System

@@ -552,6 +552,59 @@ handle('tok:open-document', async (_, filePath: string) => {
   }
 });
 
+handle('tok:typeset-document', async (_, payload: { document?: unknown; inputPath?: string }) => {
+  let inputPath = typeof payload?.inputPath === 'string' && payload.inputPath ? payload.inputPath : null;
+  let tempDocFile: string | null = null;
+  const tempDir = app.getPath('temp');
+  const uniqueSuffix = `${Date.now()}_${process.pid}_${Math.random().toString(36).slice(2, 9)}`;
+  const tempOutFile = path.join(tempDir, `tok_typeset_out_${uniqueSuffix}.json`);
+
+  try {
+    if (payload?.document) {
+      tempDocFile = path.join(tempDir, `tok_typeset_in_${uniqueSuffix}.json`);
+      const content = typeof payload.document === 'string'
+        ? payload.document
+        : JSON.stringify(payload.document, null, 2);
+      await fs.promises.writeFile(tempDocFile, content, 'utf-8');
+      inputPath = tempDocFile;
+    }
+
+    if (!inputPath) {
+      throw new Error('Either document or inputPath must be provided for typesetting');
+    }
+
+    const { code, stdout, stderr } = await runCli(['typeset-document', inputPath, tempOutFile]);
+    if (code !== 0) {
+      throw new Error(`tok-cli typeset-document failed with code ${code}: ${stderr || stdout}`);
+    }
+
+    if (!fs.existsSync(tempOutFile)) {
+      throw new Error(`Typeset failed: output file was not created at ${tempOutFile}`);
+    }
+
+    const rawContent = await fs.promises.readFile(tempOutFile, 'utf-8');
+    const pages = JSON.parse(rawContent);
+    return { success: true, pages };
+  } finally {
+    if (tempDocFile) {
+      try {
+        if (fs.existsSync(tempDocFile)) {
+          await fs.promises.unlink(tempDocFile);
+        }
+      } catch (err: any) {
+        logger.warn(`[IPC] Failed to remove temp typeset in file: ${tempDocFile}`, { error: err?.message });
+      }
+    }
+    try {
+      if (fs.existsSync(tempOutFile)) {
+        await fs.promises.unlink(tempOutFile);
+      }
+    } catch (err: any) {
+      logger.warn(`[IPC] Failed to remove temp typeset out file: ${tempOutFile}`, { error: err?.message });
+    }
+  }
+});
+
 // Logger Handlers
 handle('tok:get-recent-logs', () => logger.getRecentLogs(100));
 handle('tok:open-logs-folder', () => logger.openLogsFolder());
