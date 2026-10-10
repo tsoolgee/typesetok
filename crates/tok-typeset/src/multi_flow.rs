@@ -666,4 +666,78 @@ mod tests {
             .fold(0.0f32, f32::max);
         assert!(right <= 55.0 + 1e-3, "right edge {right}");
     }
+
+    #[test]
+    fn test_generic_spread_two_flows() {
+        let flows = vec![
+            FlowGeometrySpec::new(FlowId("primary".into()), 1).with_role(FlowPlacementRole::Primary),
+            FlowGeometrySpec::new(FlowId("commentary".into()), 2).with_role(FlowPlacementRole::InnerSpine),
+        ];
+
+        // Recto: InnerSpine should be on the LEFT (spine is left)
+        let recto = MultiFlowSolver::solve_generic_spread(
+            595.0, 842.0, 40.0, 20.0, 36.0, &flows, SpreadSide::Recto,
+        );
+        assert_eq!(recto.len(), 2);
+        let comm_recto = recto.iter().find(|a| a.flow_id.0 == "commentary").unwrap();
+        let prim_recto = recto.iter().find(|a| a.flow_id.0 == "primary").unwrap();
+        assert!(comm_recto.allocated_x_pt < prim_recto.allocated_x_pt);
+        assert!(prim_recto.allocated_width_pt > comm_recto.allocated_width_pt);
+
+        // Verso: InnerSpine should be on the RIGHT (spine is right)
+        let verso = MultiFlowSolver::solve_generic_spread(
+            595.0, 842.0, 40.0, 20.0, 36.0, &flows, SpreadSide::Verso,
+        );
+        let comm_verso = verso.iter().find(|a| a.flow_id.0 == "commentary").unwrap();
+        let prim_verso = verso.iter().find(|a| a.flow_id.0 == "primary").unwrap();
+        assert!(comm_verso.allocated_x_pt > prim_verso.allocated_x_pt);
+    }
+
+    #[test]
+    fn test_generic_spread_four_flows_mikraot_gedolot() {
+        let flows = vec![
+            spec("torah", 1),
+            spec("onkelos", 2),
+            spec("rashi", 3),
+            spec("ramban", 4),
+        ];
+        let recto = MultiFlowSolver::solve_generic_spread(
+            595.0, 842.0, 36.0, 36.0, 36.0, &flows, SpreadSide::Recto,
+        );
+        assert_eq!(recto.len(), 4);
+        for i in 0..3 {
+            assert!(recto[i].allocated_x_pt + recto[i].allocated_width_pt <= recto[i + 1].allocated_x_pt + 1e-3);
+        }
+    }
+
+    #[test]
+    fn test_generic_spread_custom_ratios() {
+        let flows = vec![
+            FlowGeometrySpec::new(FlowId("f1".into()), 1).with_width_ratio(0.5),
+            FlowGeometrySpec::new(FlowId("f2".into()), 2).with_width_ratio(0.25),
+            FlowGeometrySpec::new(FlowId("f3".into()), 3).with_width_ratio(0.25),
+        ];
+        let allocs = MultiFlowSolver::solve_generic_spread(
+            600.0, 800.0, 30.0, 30.0, 30.0, &flows, SpreadSide::Recto,
+        );
+        assert_eq!(allocs.len(), 3);
+        // f1 should have twice the width of f2 and f3
+        assert!((allocs[0].allocated_width_pt - 2.0 * allocs[1].allocated_width_pt).abs() < 1.0);
+        assert!((allocs[1].allocated_width_pt - allocs[2].allocated_width_pt).abs() < 1e-3);
+    }
+
+    #[test]
+    fn test_generic_spread_n_flows_even_distribution() {
+        let flows = (1..=5)
+            .map(|i| spec(&format!("col_{i}"), i))
+            .collect::<Vec<_>>();
+        let allocs = MultiFlowSolver::solve_generic_spread(
+            600.0, 800.0, 30.0, 30.0, 30.0, &flows, SpreadSide::Recto,
+        );
+        assert_eq!(allocs.len(), 5);
+        for i in 0..4 {
+            assert!((allocs[i].allocated_width_pt - allocs[i + 1].allocated_width_pt).abs() < 1e-3);
+            assert!(allocs[i].allocated_x_pt + allocs[i].allocated_width_pt <= allocs[i + 1].allocated_x_pt + 1e-3);
+        }
+    }
 }
