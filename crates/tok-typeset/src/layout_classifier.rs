@@ -112,7 +112,7 @@ impl DocumentClassifier {
                 let primary = features.primary_flow().map(|f| f.id.clone()).unwrap_or_else(|| non_footnote_flows[0].clone());
                 let inner = features.spine_inner_flow().map(|f| f.id.clone());
                 let outer = features.spine_outer_flow().map(|f| f.id.clone());
-                let expansion = features.explicit_expansion_flow_id.clone().or_else(|| outer.clone());
+                let expansion = features.explicit_expansion_flow_id.clone().or_else(|| inner.clone()).or_else(|| outer.clone());
 
                 return ClassificationResult {
                     family: LayoutFamily::TzuratHaDaf {
@@ -130,8 +130,11 @@ impl DocumentClassifier {
         }
 
         // 4. Tzurat HaDaf (Talmud / Classical Jewish layout with central primary and spine commentaries)
-        if features.has_spine_relative_commentaries()
-            || (features.total_flow_count() == 3 && features.primary_flow().is_some())
+        // Tzurat HaDaf accommodates at most 3 column flows (primary, inner, outer) plus optional footnote band.
+        // If there are 4 or more column flows without footnote, it is classified as ParallelColumns.
+        if non_footnote_flows.len() <= 3
+            && (features.has_spine_relative_commentaries()
+                || (features.total_flow_count() == 3 && features.primary_flow().is_some()))
         {
             let primary = features
                 .primary_flow()
@@ -151,8 +154,8 @@ impl DocumentClassifier {
             let expansion = features
                 .explicit_expansion_flow_id
                 .clone()
-                .or_else(|| outer.clone())
-                .or_else(|| inner.clone());
+                .or_else(|| inner.clone())
+                .or_else(|| outer.clone());
 
             let has_bottom = footnote_flow.is_some();
 
@@ -309,7 +312,7 @@ mod tests {
                 assert_eq!(primary_flow.0, "central_corpus");
                 assert_eq!(spine_inner_flow.unwrap().0, "spine_commentary");
                 assert_eq!(spine_outer_flow.unwrap().0, "margin_gloss");
-                assert_eq!(expansion_flow.unwrap().0, "margin_gloss");
+                assert_eq!(expansion_flow.unwrap().0, "spine_commentary");
                 assert!(!has_bottom_band);
             }
             _ => panic!("Expected TzuratHaDaf, got {:?}", res.family),

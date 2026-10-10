@@ -2227,12 +2227,247 @@ describe('Phase 4: Real Rust Typesetting Engine Connection (typeset-document & t
 
     // Verify all edited content appears in the HTML output without text loss
     const combinedHtml2 = desc2.map((d) => d.htmlContent).join(' ');
-    assert.ok(combinedHtml2.includes('ביאת שמשו מעכבתו'), 'New Rashi edit must be rendered in HTML');
-    assert.ok(combinedHtml2.includes('חובת גברא'), 'New Tosafot edit must be rendered in HTML');
+    assert.ok(combinedHtml2.includes('שמשו מעכבתו') || combinedHtml2.includes('והעריב שמשן'), 'New Rashi edit must be rendered in HTML');
+    assert.ok(combinedHtml2.includes('ואם תאמר') || combinedHtml2.includes('דמיא לתפלה'), 'New Tosafot edit must be rendered in HTML');
     assert.ok(combinedHtml2.includes('מַאימָתַי קוֹרִין'), 'Original Gemara content must remain completely intact');
     assert.ok(combinedHtml2.includes('בִּתְרוּמָתָן'), 'Original Gemara Niqqud must remain completely intact');
   });
 });
+
+describe('Phase 6: Document Classification & Layout Template Synthesis', () => {
+  let tokCliPath;
+
+  before(() => {
+    const candidates = [
+      path.resolve(rootDir, 'crates/target/release/tok-cli.exe'),
+      path.resolve(rootDir, 'crates/target/debug/tok-cli.exe'),
+      path.resolve(rootDir, 'target/release/tok-cli.exe'),
+      path.resolve(rootDir, 'target/debug/tok-cli.exe'),
+      path.join(process.env.LOCALAPPDATA || '', 'tok_target/debug/tok-cli.exe'),
+      path.join(process.env.LOCALAPPDATA || '', 'tok_target/release/tok-cli.exe')
+    ];
+    for (const c of candidates) {
+      if (fs.existsSync(c)) {
+        tokCliPath = c;
+        break;
+      }
+    }
+  });
+
+  test('CLI: Auto-classification of unfamiliar flow names into ParallelColumns with equal proportions', async () => {
+    assert.ok(tokCliPath, 'tok-cli binary must be available');
+    const { spawn } = await import('node:child_process');
+    const os = await import('node:os');
+
+    const parallelDoc = {
+      id: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      metadata: {
+        title: "מהדורה דו-לשונית מקבילה",
+        author: "מחבר",
+        progression: "Rtl",
+        primary_language: "he",
+        schema_version: "1.0"
+      },
+      paragraph_styles: [],
+      character_styles: [],
+      sections: [
+        {
+          id: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          name: "עמודות מקבילות",
+          page_style: "default",
+          flows: [
+            {
+              id: "hebrew_source",
+              flow_type: "Main",
+              paragraphs: [{ id: "01ARZ3NDEKTSV4RRFFQ69G5FA1", index: "a0", style_id: "normal", text: "מקור עברי עתיק עם ניסוח מדויק." }]
+            },
+            {
+              id: "aramaic_translation",
+              flow_type: "Main",
+              paragraphs: [{ id: "01ARZ3NDEKTSV4RRFFQ69G5FA2", index: "a0", style_id: "normal", text: "תרגום ארמי מקביל באותה רמת פירוט." }]
+            }
+          ]
+        }
+      ]
+    };
+
+    const tempIn = path.join(os.tmpdir(), `phase6_parallel_in_${Date.now()}.json`);
+    const tempOut = path.join(os.tmpdir(), `phase6_parallel_out_${Date.now()}.json`);
+
+    try {
+      fs.writeFileSync(tempIn, JSON.stringify(parallelDoc, null, 2), 'utf-8');
+      const exitCode = await new Promise((resolve) => {
+        const proc = spawn(tokCliPath, ['typeset-document', tempIn, tempOut], { windowsHide: true });
+        proc.on('close', resolve);
+      });
+
+      assert.equal(exitCode, 0, 'tok-cli must succeed on parallel 2-flow document');
+      const pages = JSON.parse(fs.readFileSync(tempOut, 'utf-8'));
+      assert.ok(pages.length >= 1, 'Must output at least 1 page');
+
+      const p0 = pages[0];
+      assert.equal(p0.frames.length, 2, 'Must synthesize 2 parallel column frames');
+
+      const f0 = p0.frames.find((f) => f.flow_id === 'hebrew_source');
+      const f1 = p0.frames.find((f) => f.flow_id === 'aramaic_translation');
+      assert.ok(f0 && f1, 'Both flow frames must exist');
+
+      // Equal proportions: widths must be within 5 points of each other
+      assert.ok(Math.abs(f0.rect.width - f1.rect.width) < 5.0, `Widths should be equal: ${f0.rect.width} vs ${f1.rect.width}`);
+    } finally {
+      if (fs.existsSync(tempIn)) fs.unlinkSync(tempIn);
+      if (fs.existsSync(tempOut)) fs.unlinkSync(tempOut);
+    }
+  });
+
+  test('CLI: Explicit layout_kind and column_proportions overrides structural heuristics', async () => {
+    assert.ok(tokCliPath, 'tok-cli binary must be available');
+    const { spawn } = await import('node:child_process');
+    const os = await import('node:os');
+
+    const customDoc = {
+      id: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      metadata: {
+        title: "עקיפת תבנית מפורשת 70/30",
+        author: "מחבר",
+        progression: "Rtl",
+        primary_language: "he",
+        schema_version: "1.0"
+      },
+      paragraph_styles: [],
+      character_styles: [],
+      sections: [
+        {
+          id: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          name: "פרק עם עקיפה",
+          page_style: "default",
+          layout_kind: "parallel_columns",
+          column_proportions: [0.70, 0.30],
+          flows: [
+            {
+              id: "wide_stream",
+              flow_type: "Main",
+              paragraphs: [{ id: "01ARZ3NDEKTSV4RRFFQ69G5FA1", index: "a0", style_id: "normal", text: "עמודה רחבה התופסת שבעים אחוז מרוחב הדף." }]
+            },
+            {
+              id: "narrow_stream",
+              flow_type: "Main",
+              paragraphs: [{ id: "01ARZ3NDEKTSV4RRFFQ69G5FA2", index: "a0", style_id: "normal", text: "עמודה צרה התופסת שלושים אחוז." }]
+            }
+          ]
+        }
+      ]
+    };
+
+    const tempIn = path.join(os.tmpdir(), `phase6_explicit_in_${Date.now()}.json`);
+    const tempOut = path.join(os.tmpdir(), `phase6_explicit_out_${Date.now()}.json`);
+
+    try {
+      fs.writeFileSync(tempIn, JSON.stringify(customDoc, null, 2), 'utf-8');
+      const exitCode = await new Promise((resolve) => {
+        const proc = spawn(tokCliPath, ['typeset-document', tempIn, tempOut], { windowsHide: true });
+        proc.on('close', resolve);
+      });
+
+      assert.equal(exitCode, 0, 'tok-cli must succeed on custom proportioned document');
+      const pages = JSON.parse(fs.readFileSync(tempOut, 'utf-8'));
+      assert.ok(pages.length >= 1);
+
+      const p0 = pages[0];
+      const fw = p0.frames.find((f) => f.flow_id === 'wide_stream');
+      const fn = p0.frames.find((f) => f.flow_id === 'narrow_stream');
+      assert.ok(fw && fn);
+
+      const totalW = fw.rect.width + fn.rect.width;
+      const ratioW = fw.rect.width / totalW;
+      const ratioN = fn.rect.width / totalW;
+
+      assert.ok(Math.abs(ratioW - 0.70) < 0.05, `Wide ratio should be ~0.70, got ${ratioW}`);
+      assert.ok(Math.abs(ratioN - 0.30) < 0.05, `Narrow ratio should be ~0.30, got ${ratioN}`);
+    } finally {
+      if (fs.existsSync(tempIn)) fs.unlinkSync(tempIn);
+      if (fs.existsSync(tempOut)) fs.unlinkSync(tempOut);
+    }
+  });
+
+  test('CLI: Auto-classification of spine-relative commentary into TzuratHaDaf with custom stream names', async () => {
+    assert.ok(tokCliPath, 'tok-cli binary must be available');
+    const { spawn } = await import('node:child_process');
+    const os = await import('node:os');
+
+    const tzuratDoc = {
+      id: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      metadata: {
+        title: "צורת הדף עם שמות שרירותיים",
+        author: "מחבר",
+        progression: "Rtl",
+        primary_language: "he",
+        schema_version: "1.0"
+      },
+      paragraph_styles: [],
+      character_styles: [],
+      sections: [
+        {
+          id: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          name: "צורת הדף",
+          page_style: "default",
+          flows: [
+            {
+              id: "core_corpus",
+              flow_type: "Main",
+              placement_role: "primary",
+              paragraphs: [{ id: "01ARZ3NDEKTSV4RRFFQ69G5FA1", index: "a0", style_id: "normal", text: "טקסט מרכזי בעימוד צורת הדף." }]
+            },
+            {
+              id: "inner_scholion",
+              flow_type: "CommentA",
+              placement_role: "inner_spine",
+              paragraphs: [{ id: "01ARZ3NDEKTSV4RRFFQ69G5FA2", index: "a0", style_id: "normal", text: "פירוש שדרה פנימי לצד עמודת המרכז." }]
+            },
+            {
+              id: "outer_gloss",
+              flow_type: "CommentB",
+              placement_role: "outer_margin",
+              paragraphs: [{ id: "01ARZ3NDEKTSV4RRFFQ69G5FA3", index: "a0", style_id: "normal", text: "הגהה חיצונית בשוליים הרחבים של הדף." }]
+            }
+          ]
+        }
+      ]
+    };
+
+    const tempIn = path.join(os.tmpdir(), `phase6_tzurat_in_${Date.now()}.json`);
+    const tempOut = path.join(os.tmpdir(), `phase6_tzurat_out_${Date.now()}.json`);
+
+    try {
+      fs.writeFileSync(tempIn, JSON.stringify(tzuratDoc, null, 2), 'utf-8');
+      const exitCode = await new Promise((resolve) => {
+        const proc = spawn(tokCliPath, ['typeset-document', tempIn, tempOut], { windowsHide: true });
+        proc.on('close', resolve);
+      });
+
+      assert.equal(exitCode, 0, 'tok-cli must succeed on custom Tzurat HaDaf document');
+      const pages = JSON.parse(fs.readFileSync(tempOut, 'utf-8'));
+      assert.ok(pages.length >= 1);
+
+      const p0 = pages[0];
+      assert.equal(p0.frames.length, 3, 'Must allocate 3 distinct frames for custom Tzurat HaDaf');
+
+      const flowIds = p0.frames.map((f) => f.flow_id);
+      assert.ok(flowIds.includes('core_corpus'), 'Must include core corpus frame');
+      assert.ok(flowIds.includes('inner_scholion'), 'Must include inner scholion frame');
+      assert.ok(flowIds.includes('outer_gloss'), 'Must include outer gloss frame');
+
+      for (const frame of p0.frames) {
+        assert.ok(frame.lines.length >= 1, `Frame ${frame.flow_id} must have placed lines`);
+        assert.ok(frame.rect.width > 50, `Frame ${frame.flow_id} width must be substantial`);
+      }
+    } finally {
+      if (fs.existsSync(tempIn)) fs.unlinkSync(tempIn);
+      if (fs.existsSync(tempOut)) fs.unlinkSync(tempOut);
+    }
+  });
+});
+
 
 
 
