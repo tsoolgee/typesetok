@@ -20,7 +20,6 @@ import { themeManager } from './theme';
 import { FONT_WEIGHT_BOLD, FONT_WEIGHT_REGULAR } from './fonts';
 import { el, icon, iconButton, button } from './ui';
 import {
-  FlowPaginator,
   MultiFlowDocumentState,
   DEFAULT_TALMUD_FLOWS,
   DEFAULT_PROSE_FLOWS,
@@ -1027,7 +1026,17 @@ export class TypesetOkApp {
 
     if (newPages.length === 0) {
       const minPages = Math.max(1, this.pages.length);
-      newPages = FlowPaginator.paginateDocument(this.documentState, minPages);
+      newPages = Array.from({ length: minPages }, (_, idx) => ({
+        pageIndex: idx,
+        gematriaNumber: toHebrewGematria(idx + 1),
+        widthPt: 595.28,
+        heightPt: 841.89,
+        htmlContent: `<div class="tok-page-layout-rust" data-page-index="${idx}" style="position: relative; width: 100%; height: 100%; overflow: hidden;">
+          <div class="tok-interactive-frame tok-frame-rust tok-frame-gemara" data-frame-id="frame_${idx}_main" data-flow-id="main" style="position: absolute; left: 0; top: 0; width: 100%; height: 100%;">
+            <div class="tok-frame-empty" style="font-size: 10px; color: var(--tok-text-muted); font-style: italic; text-align: center; padding-top: 15px;">[אין טקסט בעמוד זה]</div>
+          </div>
+        </div>`
+      }));
     }
 
     this.pages = newPages;
@@ -1152,21 +1161,17 @@ export class TypesetOkApp {
           const activeStory = newState.flows[activeKey] || [];
           this.storyEditor.loadStory(activeStory);
 
-          const newPages = FlowPaginator.paginateDocument(this.documentState);
-          this.pages = newPages;
-          this.canvas.setPages(newPages, 0);
-          this.refreshThumbnails();
-          this.updatePageStats(0);
-
-          this.hasOpenDocument = true;
-          this.welcomeModal.setHasOpenDocument(true);
-          addRecentProject({
-            name: displayTitle,
-            path: filePath,
-            pages: this.pages.length || 1,
-            lastSavedAt: new Date().toISOString()
+          this.repaginateAndSync(true).then(() => {
+            this.hasOpenDocument = true;
+            this.welcomeModal.setHasOpenDocument(true);
+            addRecentProject({
+              name: displayTitle,
+              path: filePath,
+              pages: this.pages.length || 1,
+              lastSavedAt: new Date().toISOString()
+            });
+            this.showToast(tf('toastOpenFile', { path: displayTitle }));
           });
-          this.showToast(tf('toastOpenFile', { path: displayTitle }));
         })
         .catch((err: any) => {
           console.error('[TOK] Failed to open document:', err);
@@ -1221,16 +1226,24 @@ export class TypesetOkApp {
   }
 
   private addNewPage(): void {
-    const minP = this.pages.length + 1;
-    const newPages = FlowPaginator.paginateDocument(this.documentState, minP);
-    this.pages = newPages;
-    this.canvas.setPages(newPages, this.activePageIndex);
-    this.refreshThumbnails();
-    const newIdx = this.pages.length - 1;
-    this.canvas.scrollToPage(newIdx);
-    this.updatePageStats(newIdx);
-    const newGematria = this.pages[newIdx].gematriaNumber;
-    this.showToast(tf('toastPageAdded', { page: newGematria, index: newIdx + 1 }));
+    const activeKey = this.activeFlowId || 'gemara';
+    const flowParas = this.documentState.flows[activeKey] || [];
+    flowParas.push({
+      id: `p-${Date.now()}`,
+      text: '',
+      styleId: activeKey === 'gemara' ? 'style-gemara-main' : 'style-rashi-comm'
+    });
+    this.documentState.flows[activeKey] = flowParas;
+    if (this.storyEditor) {
+      this.storyEditor.loadStory(flowParas);
+    }
+    this.repaginateAndSync(false).then(() => {
+      const newIdx = Math.max(0, this.pages.length - 1);
+      this.canvas.scrollToPage(newIdx);
+      this.updatePageStats(newIdx);
+      const newGematria = this.pages[newIdx]?.gematriaNumber || toHebrewGematria(newIdx + 1);
+      this.showToast(tf('toastPageAdded', { page: newGematria, index: newIdx + 1 }));
+    });
   }
 
   private updatePageStats(idx: number): void {

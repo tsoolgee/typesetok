@@ -217,6 +217,10 @@ function partitionParagraphs(paragraphs: StoryParagraph[], targetWordsPerPage: n
   return pages;
 }
 
+/**
+ * @deprecated Use Rust typesetting engine via `tok:typeset-document` and `typesetBridge.ts`
+ * instead of simulated JavaScript word-count splitting. Kept for backwards-compatible test fixtures.
+ */
 export class FlowPaginator {
   /**
    * Paginates a multi-flow document into a list of full PageDescriptors for SpreadCanvas.
