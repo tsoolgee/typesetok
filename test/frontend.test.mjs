@@ -1072,4 +1072,370 @@ describe('Multi-Flow Real-Time Paginator & Live Canvas Sync (Talmud Engine)', ()
   });
 });
 
+describe('Phase 1 & 2: Data Contract (documentState <-> DocumentModel) & Real PDF Export', () => {
+  let documentBridge;
+  let tokCliPath;
+
+  test('Load documentBridge module', async () => {
+    documentBridge = await loadTs('packages/tok-ui/src/engine/documentBridge.ts');
+    assert.ok(documentBridge.documentStateToDocumentRoot, 'Must export documentStateToDocumentRoot');
+    assert.ok(documentBridge.documentRootToDocumentState, 'Must export documentRootToDocumentState');
+    assert.ok(documentBridge.isValidUlid, 'Must export isValidUlid');
+    assert.ok(documentBridge.generateCrockfordUlid, 'Must export generateCrockfordUlid');
+  });
+
+  test('ULID generator produces valid 26-char Crockford Base32 identifiers', () => {
+    for (let i = 0; i < 50; i++) {
+      const id = documentBridge.generateCrockfordUlid();
+      assert.equal(id.length, 26, `ULID must be 26 chars: ${id}`);
+      assert.ok(documentBridge.isValidUlid(id), `ULID must be valid: ${id}`);
+      // First character must be <= '7' for 128-bit limit
+      assert.ok(id[0] <= '7', `First char must be <= '7': ${id}`);
+    }
+  });
+
+  test('HTML tag stripping cleans markup while preserving Hebrew and Niqqud', () => {
+    const raw = '<b>מֵאֵימָתַי קוֹרִין</b> אֶת <i>שְׁמַע</i> <span style="color:red">בְּעַרְבִית</span>?';
+    const clean = documentBridge.stripHtmlTags(raw);
+    assert.equal(clean, 'מֵאֵימָתַי קוֹרִין אֶת שְׁמַע בְּעַרְבִית?');
+  });
+
+  test('Lossless roundtrip conversion: MultiFlowDocumentState -> DocumentRoot -> MultiFlowDocumentState', () => {
+    const originalState = {
+      title: 'ספר תלמוד מסכת ברכות.tok',
+      templateType: 'gemara',
+      flows: {
+        gemara: [
+          { id: 'g-1', styleId: 'style-gemara-main', text: 'מֵאֵימָתַי קוֹרִין אֶת שְׁמַע בְּעַרְבִית?' },
+          { id: 'g-2', styleId: 'style-gemara-main', text: 'מִשָּׁעָה שֶׁהַכֹּהֲנִים נִכְנָסִים לֶאֱכֹל בִּתְרוּמָתָן.' }
+        ],
+        rashi: [
+          { id: 'r-1', styleId: 'style-rashi-body', text: 'תַּנָּא אַקְּרָא קָאֵי דִּכְתִיב בְּשָׁכְבְּךָ וּבְקוּמֶךָ.' }
+        ],
+        tosafot: [
+          { id: 't-1', styleId: 'style-tosafot-body', text: 'פֵּרֵשׁ רַשִׁ\"י דְּתַנָּא אַקְּרָא קָאֵי.' }
+        ],
+        notes: [
+          { id: 'n-1', styleId: 'style-footnotes', text: 'תורה אור: דברים ו, ז.' }
+        ]
+      }
+    };
+
+    const docRoot = documentBridge.documentStateToDocumentRoot(originalState, { author: 'רבי יהודה הנשיא' });
+
+    // Validate DocumentRoot structure
+    assert.ok(documentBridge.isValidUlid(docRoot.id), 'Root ID must be valid ULID');
+    assert.equal(docRoot.metadata.title, 'ספר תלמוד מסכת ברכות');
+    assert.equal(docRoot.metadata.author, 'רבי יהודה הנשיא');
+    assert.equal(docRoot.metadata.progression, 'Rtl');
+    assert.equal(docRoot.metadata.primary_language, 'he');
+    assert.equal(docRoot.metadata.schema_version, '1.0');
+
+    assert.ok(docRoot.paragraph_styles.length >= 4, 'Must register standard paragraph styles');
+    assert.equal(docRoot.sections.length, 1);
+    const section = docRoot.sections[0];
+    assert.ok(documentBridge.isValidUlid(section.id), 'Section ID must be valid ULID');
+    assert.equal(section.flows.length, 4);
+
+    // Verify all paragraph IDs are valid ULIDs and indices are ordered
+    for (const flow of section.flows) {
+      for (let i = 0; i < flow.paragraphs.length; i++) {
+        const p = flow.paragraphs[i];
+        assert.ok(documentBridge.isValidUlid(p.id), `Paragraph ID ${p.id} must be valid ULID`);
+        if (i > 0) {
+          assert.ok(flow.paragraphs[i - 1].index < p.index, 'Paragraph indices must be strictly ordered');
+        }
+      }
+    }
+
+    // Convert back to UI state
+    const restoredState = documentBridge.documentRootToDocumentState(docRoot);
+    assert.equal(restoredState.title, 'ספר תלמוד מסכת ברכות.tok');
+    assert.equal(restoredState.templateType, 'gemara');
+    assert.equal(restoredState.flows.gemara.length, 2);
+    assert.equal(restoredState.flows.rashi.length, 1);
+    assert.equal(restoredState.flows.tosafot.length, 1);
+    assert.equal(restoredState.flows.notes.length, 1);
+
+    assert.equal(restoredState.flows.gemara[0].text, originalState.flows.gemara[0].text);
+    assert.equal(restoredState.flows.gemara[1].text, originalState.flows.gemara[1].text);
+    assert.equal(restoredState.flows.rashi[0].text, originalState.flows.rashi[0].text);
+    assert.equal(restoredState.flows.tosafot[0].text, originalState.flows.tosafot[0].text);
+    assert.equal(restoredState.flows.notes[0].text, originalState.flows.notes[0].text);
+  });
+
+  test('Empty document conversion produces valid DocumentRoot', () => {
+    const emptyState = {
+      title: 'מסמך ריק.tok',
+      templateType: 'prose',
+      flows: { gemara: [], rashi: [], tosafot: [], notes: [] }
+    };
+
+    const docRoot = documentBridge.documentStateToDocumentRoot(emptyState);
+    assert.ok(documentBridge.isValidUlid(docRoot.id));
+    assert.equal(docRoot.metadata.title, 'מסמך ריק');
+    assert.equal(docRoot.sections.length, 1);
+    assert.ok(docRoot.sections[0].flows.length >= 1);
+    assert.equal(docRoot.sections[0].flows[0].paragraphs.length, 0);
+
+    const restored = documentBridge.documentRootToDocumentState(docRoot);
+    assert.equal(restored.title, 'מסמך ריק.tok');
+    assert.equal(restored.flows.gemara.length, 0);
+  });
+
+  test('Locate tok-cli engine binary', () => {
+    const isWin = process.platform === 'win32';
+    const exe = isWin ? 'tok-cli.exe' : 'tok-cli';
+    const candidates = [
+      process.env.TOK_CLI_PATH,
+      path.join(process.env.LOCALAPPDATA || '', 'tok_target', 'debug', exe),
+      path.join(process.env.LOCALAPPDATA || '', 'tok_target', 'release', exe),
+      path.join(rootDir, 'target', 'debug', exe),
+      path.join(rootDir, 'target', 'release', exe)
+    ];
+    tokCliPath = candidates.find((p) => p && fs.existsSync(p));
+    assert.ok(tokCliPath, `tok-cli binary must be found. Checked: ${candidates.filter(Boolean).join(', ')}`);
+  });
+
+  test('Integration: Export real user document with unique marker text to PDF', async () => {
+    const { spawn } = await import('node:child_process');
+    const os = await import('node:os');
+
+    const uniqueMarker = `TYPESETOK_UNIQUE_MARKER_${Date.now()}_עברית`;
+    const uniqueTitle = `ספר בדיקה ייחודי ${Date.now()}`;
+
+    const userState = {
+      title: uniqueTitle,
+      templateType: 'gemara',
+      flows: {
+        gemara: [
+          { id: 'g-1', styleId: 'style-gemara-main', text: `טקסט משתמש ראשי עם סימון ייחודי: ${uniqueMarker}.` }
+        ],
+        rashi: [
+          { id: 'r-1', styleId: 'style-rashi-body', text: 'פירוש רש\"י המקורי של המשתמש.' }
+        ],
+        tosafot: [],
+        notes: []
+      }
+    };
+
+    const docRoot = documentBridge.documentStateToDocumentRoot(userState);
+
+    const tempJsonPath = path.join(os.tmpdir(), `tok_test_doc_${Date.now()}.json`);
+    const tempPdfPath = path.join(os.tmpdir(), `tok_test_out_${Date.now()}.pdf`);
+
+    try {
+      fs.writeFileSync(tempJsonPath, JSON.stringify(docRoot, null, 2), 'utf-8');
+
+      const cliResult = await new Promise((resolve, reject) => {
+        const proc = spawn(tokCliPath, ['render-pdf', tempJsonPath, tempPdfPath], { windowsHide: true });
+        let stdout = '';
+        let stderr = '';
+        proc.stdout?.on('data', (d) => (stdout += d.toString()));
+        proc.stderr?.on('data', (d) => (stderr += d.toString()));
+        proc.on('error', reject);
+        proc.on('close', (code) => resolve({ code, stdout, stderr }));
+      });
+
+      assert.equal(cliResult.code, 0, `tok-cli render-pdf failed: ${cliResult.stderr || cliResult.stdout}`);
+      assert.ok(fs.existsSync(tempPdfPath), 'PDF file must be created on disk');
+
+      const pdfStats = fs.statSync(tempPdfPath);
+      assert.ok(pdfStats.size > 1000, `PDF size must be substantial (>1000 bytes), got ${pdfStats.size}`);
+
+      const pdfBytes = fs.readFileSync(tempPdfPath);
+      const pdfHeader = pdfBytes.slice(0, 8).toString('ascii');
+      assert.ok(pdfHeader.startsWith('%PDF-1.'), 'File must start with valid PDF header %PDF-1.x');
+
+      const pdfText = pdfBytes.toString('latin1');
+
+      // 1. Verify user's document title is in the PDF metadata (handles both plain UTF-8 and PDF UTF-16BE hex strings)
+      const expectedTitleHex = Array.from(uniqueTitle)
+        .map((c) => c.charCodeAt(0).toString(16).padStart(4, '0').toUpperCase())
+        .join('');
+      assert.ok(
+        pdfText.includes('/Title') && (
+          pdfText.includes(uniqueTitle) ||
+          pdfBytes.includes(Buffer.from(uniqueTitle, 'utf-8')) ||
+          pdfText.includes(expectedTitleHex)
+        ),
+        'User document title must appear in PDF metadata'
+      );
+
+      // 2. Verify demo text is NOT in the PDF
+      assert.ok(!pdfText.includes('מֵאֵימָתַי קוֹרִין אֶת שְׁמַע בְּעַרְבִית'), 'Built-in demo text must NOT appear in user export');
+      assert.ok(!pdfText.includes('תלמוד בבלי - מסכת ברכות'), 'Demo title must NOT appear in user export');
+
+      // 3. Verify unique user marker characters appear in the PDF font's ToUnicode mapping
+      const zlib = await import('node:zlib');
+      let decompressedStreams = '';
+      let pos = 0;
+      while (pos < pdfBytes.length) {
+        const streamStart = pdfBytes.indexOf(Buffer.from('stream'), pos);
+        if (streamStart === -1) break;
+        const streamDataStart = pdfBytes[streamStart + 6] === 0x0a ? streamStart + 7 : streamStart + 8;
+        const streamEnd = pdfBytes.indexOf(Buffer.from('endstream'), streamDataStart);
+        if (streamEnd === -1) break;
+        let dataEnd = streamEnd;
+        while (dataEnd > streamDataStart && (pdfBytes[dataEnd - 1] === 0x0a || pdfBytes[dataEnd - 1] === 0x0d)) {
+          dataEnd--;
+        }
+        try {
+          const uncompressed = zlib.inflateSync(pdfBytes.slice(streamDataStart, dataEnd));
+          decompressedStreams += uncompressed.toString('utf-8') + '\n';
+        } catch (_) {}
+        pos = streamEnd + 9;
+      }
+
+      assert.ok(decompressedStreams.includes('/TOK-Custom-ToUnicode'), 'PDF must include ToUnicode CMap');
+      for (const char of uniqueMarker) {
+        const charHex = char.charCodeAt(0).toString(16).padStart(4, '0').toUpperCase();
+        assert.ok(
+          decompressedStreams.includes(`<${charHex}>`),
+          `Unique marker character '${char}' (U+${charHex}) must be present in the PDF font mapping`
+        );
+      }
+
+      // 4. Verify PDF is pre-press compliant
+      assert.ok(pdfText.includes('/GTS_PDFXVersion'), 'PDF must include PDF/X OutputIntent');
+    } finally {
+      if (fs.existsSync(tempJsonPath)) fs.unlinkSync(tempJsonPath);
+      if (fs.existsSync(tempPdfPath)) fs.unlinkSync(tempPdfPath);
+    }
+  });
+
+  test('Integration: Export empty document produces valid PDF without crashing', async () => {
+    const { spawn } = await import('node:child_process');
+    const os = await import('node:os');
+
+    const emptyState = {
+      title: 'מסמך ריק לבדיקה',
+      templateType: 'prose',
+      flows: { gemara: [], rashi: [], tosafot: [], notes: [] }
+    };
+
+    const docRoot = documentBridge.documentStateToDocumentRoot(emptyState);
+    const tempJsonPath = path.join(os.tmpdir(), `tok_empty_doc_${Date.now()}.json`);
+    const tempPdfPath = path.join(os.tmpdir(), `tok_empty_out_${Date.now()}.pdf`);
+
+    try {
+      fs.writeFileSync(tempJsonPath, JSON.stringify(docRoot, null, 2), 'utf-8');
+
+      const cliResult = await new Promise((resolve, reject) => {
+        const proc = spawn(tokCliPath, ['render-pdf', tempJsonPath, tempPdfPath], { windowsHide: true });
+        let stdout = '';
+        let stderr = '';
+        proc.stdout?.on('data', (d) => (stdout += d.toString()));
+        proc.stderr?.on('data', (d) => (stderr += d.toString()));
+        proc.on('error', reject);
+        proc.on('close', (code) => resolve({ code, stdout, stderr }));
+      });
+
+      assert.equal(cliResult.code, 0, `tok-cli must succeed on empty document: ${cliResult.stderr}`);
+      assert.ok(fs.existsSync(tempPdfPath), 'PDF file must be created for empty document');
+      const pdfBytes = fs.readFileSync(tempPdfPath);
+      assert.ok(pdfBytes.slice(0, 8).toString('ascii').startsWith('%PDF-1.'));
+      assert.ok(pdfBytes.length > 500);
+    } finally {
+      if (fs.existsSync(tempJsonPath)) fs.unlinkSync(tempJsonPath);
+      if (fs.existsSync(tempPdfPath)) fs.unlinkSync(tempPdfPath);
+    }
+  });
+
+  test('Integration: Multi-paragraph document with Hebrew Niqqud exports correctly', async () => {
+    const { spawn } = await import('node:child_process');
+    const os = await import('node:os');
+
+    const paragraphs = [
+      'בְּרֵאשִׁית בָּרָא אֱלֹהִים אֵת הַשָּׁמַיִם וְאֵת הָאָרֶץ.',
+      'וְהָאָרֶץ הָיְתָה תֹהוּ וָבֹהוּ וְחֹשֶׁךְ עַל פְּנֵי תְהוֹם וְרוּחַ אֱלֹהִים מְרַחֶפֶת עַל פְּנֵי הַמָּיִם.',
+      'וַיֹּאמֶר אֱלֹהִים יְהִי אוֹר וַיְהִי אוֹר.',
+      'וַיַּרְא אֱלֹהִים אֶת הָאוֹר כִּי טוֹב וַיַּבְדֵּל אֱלֹהִים בֵּין הָאוֹר וּבֵין הַחֹשֶׁךְ.'
+    ];
+
+    const state = {
+      title: 'ספר בראשית',
+      templateType: 'prose',
+      flows: {
+        gemara: paragraphs.map((text, i) => ({ id: `p-${i}`, styleId: 'normal', text })),
+        rashi: [],
+        tosafot: [],
+        notes: []
+      }
+    };
+
+    const docRoot = documentBridge.documentStateToDocumentRoot(state);
+    const tempJsonPath = path.join(os.tmpdir(), `tok_niqqud_doc_${Date.now()}.json`);
+    const tempPdfPath = path.join(os.tmpdir(), `tok_niqqud_out_${Date.now()}.pdf`);
+
+    try {
+      fs.writeFileSync(tempJsonPath, JSON.stringify(docRoot, null, 2), 'utf-8');
+
+      const cliResult = await new Promise((resolve, reject) => {
+        const proc = spawn(tokCliPath, ['render-pdf', tempJsonPath, tempPdfPath], { windowsHide: true });
+        let stdout = '';
+        let stderr = '';
+        proc.stdout?.on('data', (d) => (stdout += d.toString()));
+        proc.stderr?.on('data', (d) => (stderr += d.toString()));
+        proc.on('error', reject);
+        proc.on('close', (code) => resolve({ code, stdout, stderr }));
+      });
+
+      assert.equal(cliResult.code, 0, `tok-cli must succeed on niqqud document: ${cliResult.stderr}`);
+      assert.ok(fs.existsSync(tempPdfPath));
+      const stats = fs.statSync(tempPdfPath);
+      assert.ok(stats.size > 2000, `Multi-paragraph PDF must be > 2000 bytes, got ${stats.size}`);
+    } finally {
+      if (fs.existsSync(tempJsonPath)) fs.unlinkSync(tempJsonPath);
+      if (fs.existsSync(tempPdfPath)) fs.unlinkSync(tempPdfPath);
+    }
+  });
+
+  test('Error Handling: Non-existent input or corrupted document fails and reports error', async () => {
+    const { spawn } = await import('node:child_process');
+    const os = await import('node:os');
+
+    const nonExistentPath = path.join(os.tmpdir(), `non_existent_${Date.now()}.tok`);
+    const tempPdfPath = path.join(os.tmpdir(), `should_not_exist_${Date.now()}.pdf`);
+
+    const cliResult = await new Promise((resolve) => {
+      const proc = spawn(tokCliPath, ['render-pdf', nonExistentPath, tempPdfPath], { windowsHide: true });
+      let stdout = '';
+      let stderr = '';
+      proc.stdout?.on('data', (d) => (stdout += d.toString()));
+      proc.stderr?.on('data', (d) => (stderr += d.toString()));
+      proc.on('close', (code) => resolve({ code, stdout, stderr }));
+    });
+
+    assert.notEqual(cliResult.code, 0, 'Must exit with non-zero code on missing file');
+    assert.equal(fs.existsSync(tempPdfPath), false, 'PDF must NOT be created when input is missing');
+  });
+
+  test('Backward Compatibility: --demo flag still functions as expected', async () => {
+    const { spawn } = await import('node:child_process');
+    const os = await import('node:os');
+
+    const tempPdfPath = path.join(os.tmpdir(), `tok_demo_out_${Date.now()}.pdf`);
+
+    try {
+      const cliResult = await new Promise((resolve, reject) => {
+        const proc = spawn(tokCliPath, ['render-pdf', '--demo', tempPdfPath], { windowsHide: true });
+        let stdout = '';
+        let stderr = '';
+        proc.stdout?.on('data', (d) => (stdout += d.toString()));
+        proc.stderr?.on('data', (d) => (stderr += d.toString()));
+        proc.on('error', reject);
+        proc.on('close', (code) => resolve({ code, stdout, stderr }));
+      });
+
+      assert.equal(cliResult.code, 0, `tok-cli render-pdf --demo failed: ${cliResult.stderr}`);
+      assert.ok(fs.existsSync(tempPdfPath), 'Demo PDF must be generated');
+      const stats = fs.statSync(tempPdfPath);
+      assert.ok(stats.size > 2000, 'Demo PDF must be > 2000 bytes');
+    } finally {
+      if (fs.existsSync(tempPdfPath)) fs.unlinkSync(tempPdfPath);
+    }
+  });
+});
+
 
