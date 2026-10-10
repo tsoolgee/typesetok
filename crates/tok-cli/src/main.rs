@@ -1,8 +1,10 @@
+use std::collections::HashMap;
 use std::env;
 use std::fs;
+use std::path::Path;
 use std::time::Instant;
 use tok_core::id::FractionalIndex;
-use tok_core::model::{DocumentModel, DocumentRoot, ParagraphNode};
+use tok_core::model::{DocumentModel, DocumentRoot, Flow, FlowId, FlowType, ParagraphNode};
 use tok_pdf::html_projection::HtmlProjectionCompiler;
 use tok_pdf::pdf_engine::{PdfExportOptions, PdfPrePressEngine, PdfXStandard};
 use tok_storage::package::{TokManifest, TokPackage};
@@ -19,8 +21,8 @@ USAGE:
     tok-cli <COMMAND> [OPTIONS]
 
 COMMANDS:
-    render-pdf <INPUT> <OUTPUT>     Render a .tok document or demo to ISO PDF/X-1a
-    render-html <INPUT> <OUTPUT>    Render a .tok document or demo to pre-paginated HTML
+    render-pdf <INPUT> <OUTPUT>     Render a .tok, .json, or demo document to ISO PDF/X-1a
+    render-html <INPUT> <OUTPUT>    Render a .tok, .json, or demo document to pre-paginated HTML
     benchmark-typeset [--pages N]   Run 1,000-page stress test and cascade latency benchmark
     verify-determinism              Verify bit-for-bit layout & PDF output determinism
     inspect-package <INPUT>         Inspect .tok package manifest, metadata, and assets
@@ -60,16 +62,161 @@ fn create_sample_hebrew_document(num_paragraphs: usize) -> DocumentModel {
     DocumentModel::new(root)
 }
 
+#[derive(serde::Deserialize)]
+struct RawMultiFlowState {
+    title: Option<String>,
+    #[serde(rename = "templateType")]
+    template_type: Option<String>,
+    #[serde(default)]
+    flows: HashMap<String, Vec<RawStoryPara>>,
+}
+
+#[derive(serde::Deserialize)]
+struct RawStoryPara {
+    id: Option<String>,
+    #[serde(rename = "styleId")]
+    style_id: Option<String>,
+    #[serde(default)]
+    text: String,
+}
+
+fn convert_multi_flow_state_to_root(raw: RawMultiFlowState) -> DocumentRoot {
+    let title = raw.title.unwrap_or_else(|| "מסמך ללא שם".to_string());
+    let mut root = DocumentRoot::new(&title);
+    root.sections.clear();
+
+    let is_prose = raw.template_type.as_deref() == Some("prose");
+    let mut section = tok_core::model::SectionNode::new(&title, "chapter-first");
+    section.flows.clear();
+
+    for (flow_key, paras) in raw.flows {
+        let (flow_id, flow_type) = match flow_key.as_str() {
+            "gemara" => {
+                if is_prose {
+                    (FlowId::main(), FlowType::Main)
+                } else {
+                    (FlowId::new("gemara"), FlowType::Main)
+                }
+            }
+            "rashi" => (FlowId::new("rashi"), FlowType::CommentA),
+            "tosafot" => (FlowId::new("tosafot"), FlowType::CommentB),
+            "notes" => (FlowId::new("notes"), FlowType::Footnote),
+            "main" => (FlowId::main(), FlowType::Main),
+            other => (FlowId::new(other), FlowType::Main),
+        };
+
+        let mut flow = Flow::new(flow_id, flow_type);
+        let mut prev_idx: Option<FractionalIndex> = None;
+        for p in paras {
+            let next_idx = match FractionalIndex::between(prev_idx.as_ref(), None) {
+                Ok(idx) => idx,
+                Err(_) => FractionalIndex::initial(),
+            };
+            let style = p.style_id.unwrap_or_else(|| "default-body".to_string());
+            let mut node = ParagraphNode::new(next_idx.clone(), style, &p.text);
+            if let Some(ref id_str) = p.id {
+                if let Ok(node_id) = tok_core::id::NodeId::from_string(id_str) {
+                    node.id = node_id;
+                }
+            }
+            flow.paragraphs.push(node);
+            prev_idx = Some(next_idx);
+        }
+        section.flows.push(flow);
+    }
+
+    if section.flows.is_empty() {
+        section.flows.push(Flow::new(FlowId::main(), FlowType::Main));
+    }
+
+    root.sections.push(section);
+    root
+}
+
+fn parse_document_json(
+    content: &str,
+) -> Result<(DocumentModel, TokManifest), Box<dyn std::error::Error>> {
+    // 1. Direct DocumentRoot JSON
+    if let Ok(root) = DocumentRoot::from_json(content) {
+        let mut manifest = TokManifest::default();
+        manifest.title = root.metadata.title.clone();
+        manifest.author = root.metadata.author.clone();
+        manifest.document_id = root.id.to_string();
+        return Ok((DocumentModel::new(root), manifest));
+    }
+
+    // 2. Migration pipeline (for older schemas)
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Ok(migrated) = tok_storage::migration::MigrationPipeline::migrate_document_json(val) {
+            if let Ok(root) = serde_json::from_value::<DocumentRoot>(migrated) {
+                let mut manifest = TokManifest::default();
+                manifest.title = root.metadata.title.clone();
+                manifest.author = root.metadata.author.clone();
+                manifest.document_id = root.id.to_string();
+                return Ok((DocumentModel::new(root), manifest));
+            }
+        }
+    }
+
+    // 3. Raw MultiFlowDocumentState from UI
+    if let Ok(raw_state) = serde_json::from_str::<RawMultiFlowState>(content) {
+        let root = convert_multi_flow_state_to_root(raw_state);
+        let mut manifest = TokManifest::default();
+        manifest.title = root.metadata.title.clone();
+        manifest.author = root.metadata.author.clone();
+        manifest.document_id = root.id.to_string();
+        return Ok((DocumentModel::new(root), manifest));
+    }
+
+    Err("Invalid document JSON: could not parse as DocumentRoot or MultiFlowDocumentState".into())
+}
+
+fn load_document_input(
+    input: &str,
+    demo_paragraphs: usize,
+) -> Result<(DocumentModel, TokManifest), Box<dyn std::error::Error>> {
+    if input == "--demo" {
+        println!("  - Generating demo Hebrew document with Niqqud...");
+        return Ok((
+            create_sample_hebrew_document(demo_paragraphs),
+            TokManifest::default(),
+        ));
+    }
+
+    let path = Path::new(input);
+    if !path.exists() {
+        return Err(format!("Input file does not exist: {}", input).into());
+    }
+
+    // If file extension is .json, parse directly
+    if input.ends_with(".json") {
+        println!("  - Reading document JSON from: {}", input);
+        let content = fs::read_to_string(input)?;
+        return parse_document_json(&content);
+    }
+
+    // Try opening as .tok zip package
+    match TokPackage::open(input) {
+        Ok((model, pkg)) => {
+            println!("  - Opened .tok package from: {}", input);
+            Ok((model, pkg.manifest))
+        }
+        Err(tok_err) => {
+            // Check if file content is JSON despite missing .json extension
+            if let Ok(content) = fs::read_to_string(input) {
+                if content.trim_start().starts_with('{') {
+                    println!("  - Parsing input as document JSON: {}", input);
+                    return parse_document_json(&content);
+                }
+            }
+            Err(format!("Failed to open package or document ({}): {}", input, tok_err).into())
+        }
+    }
+}
+
 fn handle_render_pdf(input: &str, output: &str) -> Result<(), Box<dyn std::error::Error>> {
     println!("[TOK-CLI] Rendering document to Pre-Press PDF: {}", output);
-    let (doc, manifest) = if input == "--demo" {
-        println!("  - Generating demo Hebrew document with Niqqud...");
-        (create_sample_hebrew_document(30), TokManifest::default())
-    } else {
-        println!("  - Opening .tok package from: {}", input);
-        let (model, pkg) = TokPackage::open(input)?;
-        (model, pkg.manifest)
-    };
+    let (doc, manifest) = load_document_input(input, 30)?;
 
     let start_typeset = Instant::now();
     let engine = TypesettingEngine::new(TypesettingEngineConfig::default());
@@ -93,6 +240,12 @@ fn handle_render_pdf(input: &str, output: &str) -> Result<(), Box<dyn std::error
 
     let pdf_bytes =
         PdfPrePressEngine::export_pdf_with_fonts(&pages, &options, &engine.font_manager)?;
+
+    if let Some(parent) = Path::new(output).parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)?;
+        }
+    }
     fs::write(output, &pdf_bytes)?;
     let pdf_dur = start_pdf.elapsed();
     println!(
@@ -109,20 +262,18 @@ fn handle_render_html(input: &str, output: &str) -> Result<(), Box<dyn std::erro
         "[TOK-CLI] Rendering document to Pre-Paginated HTML: {}",
         output
     );
-    let doc = if input == "--demo" {
-        println!("  - Generating demo Hebrew document...");
-        create_sample_hebrew_document(20)
-    } else {
-        println!("  - Opening .tok package from: {}", input);
-        let (model, _) = TokPackage::open(input)?;
-        model
-    };
+    let (doc, _) = load_document_input(input, 20)?;
 
     let engine = TypesettingEngine::new(TypesettingEngineConfig::default());
     let pages = engine.typeset_document(doc.root());
     println!("  - Typeset {} pages", pages.len());
 
     let html = HtmlProjectionCompiler::compile_to_html(&pages, 210.0, 297.0);
+    if let Some(parent) = Path::new(output).parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)?;
+        }
+    }
     fs::write(output, &html)?;
     println!(
         "  [SUCCESS] Written Pre-paginated HTML ({} bytes) to: {}",
