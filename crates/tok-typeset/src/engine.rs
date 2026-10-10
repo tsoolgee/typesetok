@@ -1604,8 +1604,8 @@ mod tests {
 
         let result = eng.typeset_co_paginated_document(&tmpl, &sync_cfg, &doc);
         assert!(!result.pages.is_empty());
-        assert_eq!(result.total_gemara_lines > 0, true);
-        assert_eq!(result.total_rashi_lines > 0, true);
+        assert!(result.total_gemara_lines > 0);
+        assert!(result.total_rashi_lines > 0);
     }
 
     #[test]

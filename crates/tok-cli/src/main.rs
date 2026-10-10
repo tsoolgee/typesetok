@@ -141,15 +141,22 @@ fn convert_multi_flow_state_to_root(raw: RawMultiFlowState) -> DocumentRoot {
     root
 }
 
+/// Builds the package manifest (title, author, document id) for a parsed document.
+fn manifest_for_root(root: &DocumentRoot) -> TokManifest {
+    TokManifest {
+        title: root.metadata.title.clone(),
+        author: root.metadata.author.clone(),
+        document_id: root.id.to_string(),
+        ..TokManifest::default()
+    }
+}
+
 fn parse_document_json(
     content: &str,
 ) -> Result<(DocumentModel, TokManifest), Box<dyn std::error::Error>> {
     // 1. Direct DocumentRoot JSON
     if let Ok(root) = DocumentRoot::from_json(content) {
-        let mut manifest = TokManifest::default();
-        manifest.title = root.metadata.title.clone();
-        manifest.author = root.metadata.author.clone();
-        manifest.document_id = root.id.to_string();
+        let manifest = manifest_for_root(&root);
         return Ok((DocumentModel::new(root), manifest));
     }
 
@@ -158,10 +165,7 @@ fn parse_document_json(
         if let Ok(migrated) = tok_storage::migration::MigrationPipeline::migrate_document_json(val)
         {
             if let Ok(root) = serde_json::from_value::<DocumentRoot>(migrated) {
-                let mut manifest = TokManifest::default();
-                manifest.title = root.metadata.title.clone();
-                manifest.author = root.metadata.author.clone();
-                manifest.document_id = root.id.to_string();
+                let manifest = manifest_for_root(&root);
                 return Ok((DocumentModel::new(root), manifest));
             }
         }
@@ -170,10 +174,7 @@ fn parse_document_json(
     // 3. Raw MultiFlowDocumentState from UI
     if let Ok(raw_state) = serde_json::from_str::<RawMultiFlowState>(content) {
         let root = convert_multi_flow_state_to_root(raw_state);
-        let mut manifest = TokManifest::default();
-        manifest.title = root.metadata.title.clone();
-        manifest.author = root.metadata.author.clone();
-        manifest.document_id = root.id.to_string();
+        let manifest = manifest_for_root(&root);
         return Ok((DocumentModel::new(root), manifest));
     }
 

@@ -145,7 +145,7 @@ impl TemplateSynthesizer {
         let normalized: Vec<f32> = raw_props.iter().map(|&p| p * norm_factor).collect();
 
         let mut specs = Vec::with_capacity(count);
-        for i in 0..count {
+        for (i, &ratio) in normalized.iter().enumerate() {
             let flow_id = flow_ids
                 .get(i)
                 .cloned()
@@ -154,7 +154,7 @@ impl TemplateSynthesizer {
 
             let spec = FlowGeometrySpec::new(flow_id, (i + 1) as u8)
                 .with_role(FlowPlacementRole::Column(i))
-                .with_width_ratio(normalized[i]);
+                .with_width_ratio(ratio);
             specs.push(spec);
         }
 
