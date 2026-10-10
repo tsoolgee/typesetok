@@ -403,4 +403,79 @@ mod tests {
         assert_eq!(loaded.sections.len(), 1);
         assert_eq!(loaded.sections[0].flows[0].paragraphs.len(), 0);
     }
+
+    #[test]
+    fn test_flow_layout_constraints_serialization_roundtrip() {
+        let mut root = DocumentRoot::new("תבנית רב-זרימתית");
+        let sec = &mut root.sections[0];
+        *sec = SectionNode::new("פרק ראשון", "talmud-page")
+            .with_layout_kind("dynamic_talmud")
+            .with_column_proportions(vec![0.40, 0.28, 0.32])
+            .with_expansion_flow_id(FlowId::new("rashi"));
+
+        let flow1 = Flow::new(FlowId::new("main"), FlowType::Main)
+            .with_width_ratio(0.40)
+            .with_placement_role("primary");
+        let flow2 = Flow::new(FlowId::new("rashi"), FlowType::CommentA)
+            .with_width_ratio(0.28)
+            .with_placement_role("inner_spine");
+        let flow3 = Flow::new(FlowId::new("tosafot"), FlowType::CommentB)
+            .with_width_ratio(0.32)
+            .with_placement_role("outer_margin");
+
+        sec.flows = vec![flow1, flow2, flow3];
+
+        let json = root.to_json().expect("Serialization must succeed");
+        let loaded = DocumentRoot::from_json(&json).expect("Deserialization must succeed");
+
+        let loaded_sec = &loaded.sections[0];
+        assert_eq!(loaded_sec.layout_kind.as_deref(), Some("dynamic_talmud"));
+        assert_eq!(loaded_sec.column_proportions, Some(vec![0.40, 0.28, 0.32]));
+        assert_eq!(loaded_sec.expansion_flow_id, Some(FlowId::new("rashi")));
+
+        assert_eq!(loaded_sec.flows[0].width_ratio, Some(0.40));
+        assert_eq!(loaded_sec.flows[0].placement_role.as_deref(), Some("primary"));
+        assert_eq!(loaded_sec.flows[1].width_ratio, Some(0.28));
+        assert_eq!(loaded_sec.flows[1].placement_role.as_deref(), Some("inner_spine"));
+        assert_eq!(loaded_sec.flows[2].width_ratio, Some(0.32));
+        assert_eq!(loaded_sec.flows[2].placement_role.as_deref(), Some("outer_margin"));
+    }
+
+    #[test]
+    fn test_flow_layout_backwards_compatibility() {
+        let legacy_json = r#"{
+            "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+            "metadata": {
+                "title": "ישן",
+                "author": "מחבר",
+                "progression": "Rtl",
+                "primary_language": "he",
+                "schema_version": "1.0"
+            },
+            "paragraph_styles": [],
+            "character_styles": [],
+            "sections": [
+                {
+                    "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+                    "name": "שער",
+                    "page_style": "default",
+                    "flows": [
+                        {
+                            "id": "main",
+                            "flow_type": "Main",
+                            "paragraphs": []
+                        }
+                    ]
+                }
+            ]
+        }"#;
+
+        let loaded = DocumentRoot::from_json(legacy_json).expect("Legacy JSON must parse");
+        let sec = &loaded.sections[0];
+        assert!(sec.layout_kind.is_none());
+        assert!(sec.column_proportions.is_none());
+        assert!(sec.expansion_flow_id.is_none());
+        assert!(sec.flows[0].width_ratio.is_none());
+        assert!(sec.flows[0].placement_role.is_none());
+    }
 }
