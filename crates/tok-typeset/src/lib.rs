@@ -7,11 +7,13 @@ pub mod geometry;
 pub mod hebrew_justify;
 pub mod hit_test;
 pub mod knuth_plass;
+pub mod layout_family;
 pub mod layout_features;
 pub mod multi_flow;
 pub mod shaper;
 
 pub use bidi::{BidiEngine, BidiRun};
+pub use layout_family::LayoutFamily;
 pub use layout_features::{DocumentLayoutFeatures, FlowFeature};
 pub use co_pagination::{
     ActiveSyncResult, ActiveSynchronizer, AnchorKey, AnchorPoint, CancellationToken,
