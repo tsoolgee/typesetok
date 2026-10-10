@@ -475,6 +475,83 @@ async function renderWithCli(kind: 'pdf' | 'html', payload: any): Promise<string
 handle('tok:render-pdf', (_, payload) => renderWithCli('pdf', payload));
 handle('tok:render-html', (_, payload) => renderWithCli('html', payload));
 
+handle('tok:save-document', async (_, payload: { document?: unknown; filePath?: string }) => {
+  const filePath = requireString(payload?.filePath, 'filePath');
+  const targetPath = path.isAbsolute(filePath) ? filePath : path.resolve(filePath);
+
+  if (!payload?.document) {
+    throw new Error('Document content must be provided for saving');
+  }
+
+  const tempDir = app.getPath('temp');
+  const uniqueSuffix = `${Date.now()}_${process.pid}_${Math.random().toString(36).slice(2, 9)}`;
+  const tempDocFile = path.join(tempDir, `tok_save_${uniqueSuffix}.json`);
+
+  try {
+    const content = typeof payload.document === 'string'
+      ? payload.document
+      : JSON.stringify(payload.document, null, 2);
+    await fs.promises.writeFile(tempDocFile, content, 'utf-8');
+
+    const { code, stdout, stderr } = await runCli(['save-package', tempDocFile, targetPath]);
+    if (code !== 0) {
+      throw new Error(`tok-cli save-package failed with code ${code}: ${stderr || stdout}`);
+    }
+
+    if (!fs.existsSync(targetPath)) {
+      throw new Error(`Save failed: .tok package was not created at ${targetPath}`);
+    }
+
+    logger.info(`[IPC] Document saved successfully to: ${targetPath}`);
+    return { success: true, filePath: targetPath };
+  } finally {
+    try {
+      if (fs.existsSync(tempDocFile)) {
+        await fs.promises.unlink(tempDocFile);
+      }
+    } catch (err: any) {
+      logger.warn(`[IPC] Failed to remove temp save file: ${tempDocFile}`, { error: err?.message });
+    }
+  }
+});
+
+handle('tok:open-document', async (_, filePath: string) => {
+  const sourcePath = requireString(filePath, 'filePath');
+  const resolvedPath = path.isAbsolute(sourcePath) ? sourcePath : path.resolve(sourcePath);
+
+  if (!fs.existsSync(resolvedPath)) {
+    throw new Error(`File does not exist: ${resolvedPath}`);
+  }
+
+  const tempDir = app.getPath('temp');
+  const uniqueSuffix = `${Date.now()}_${process.pid}_${Math.random().toString(36).slice(2, 9)}`;
+  const tempOutFile = path.join(tempDir, `tok_open_${uniqueSuffix}.json`);
+
+  try {
+    const { code, stdout, stderr } = await runCli(['open-package', resolvedPath, tempOutFile]);
+    if (code !== 0) {
+      throw new Error(`tok-cli open-package failed with code ${code}: ${stderr || stdout}`);
+    }
+
+    if (!fs.existsSync(tempOutFile)) {
+      throw new Error(`Open failed: extracted JSON was not produced at ${tempOutFile}`);
+    }
+
+    const rawContent = await fs.promises.readFile(tempOutFile, 'utf-8');
+    const docRoot = JSON.parse(rawContent);
+    logger.info(`[IPC] Document opened successfully from: ${resolvedPath}`);
+    return docRoot;
+  } finally {
+    try {
+      if (fs.existsSync(tempOutFile)) {
+        await fs.promises.unlink(tempOutFile);
+      }
+    } catch (err: any) {
+      logger.warn(`[IPC] Failed to remove temp open file: ${tempOutFile}`, { error: err?.message });
+    }
+  }
+});
+
 // Logger Handlers
 handle('tok:get-recent-logs', () => logger.getRecentLogs(100));
 handle('tok:open-logs-folder', () => logger.openLogsFolder());

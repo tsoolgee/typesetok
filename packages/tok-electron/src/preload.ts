@@ -24,6 +24,10 @@ export interface TokIpcBridge {
   getPluginSystemStatus: () => Promise<{ isSafeMode: boolean; isSaferActive: boolean; userPluginsDir: string; builtinPluginsDir: string }>;
   setPluginSafeMode: (enabled: boolean) => Promise<boolean>;
 
+  // Document Storage
+  saveDocument: (payload: { document: unknown; filePath: string }) => Promise<{ success: boolean; filePath: string }>;
+  openDocument: (filePath: string) => Promise<unknown>;
+
   // System & Utilities
   openExternal: (url: string) => Promise<void>;
   getAppInfo: () => Promise<{ version: string; name: string }>;
@@ -102,6 +106,14 @@ const tokIpc: TokIpcBridge = {
   },
   setPluginSafeMode: async (enabled: boolean) => {
     return await ipcRenderer.invoke('tok:set-plugin-safe-mode', enabled);
+  },
+
+  // Document Storage
+  saveDocument: async (payload: { document: unknown; filePath: string }) => {
+    return await ipcRenderer.invoke('tok:save-document', payload);
+  },
+  openDocument: async (filePath: string) => {
+    return await ipcRenderer.invoke('tok:open-document', filePath);
   },
 
   // System
