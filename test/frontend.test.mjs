@@ -1943,6 +1943,177 @@ describe('Phase 4: Real Rust Typesetting Engine Connection (typeset-document & t
       if (fs.existsSync(tempOut)) fs.unlinkSync(tempOut);
     }
   });
+
+  test('CLI MultiFlow: 2-flow dual-stream document typesets with proportional columns via tok-cli', async () => {
+    assert.ok(tokCliPath, 'tok-cli binary must be available');
+    const { spawn } = await import('node:child_process');
+    const os = await import('node:os');
+
+    const doc2Flow = {
+      id: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      metadata: {
+        title: "ספר לימוד דו-זרימתי",
+        author: "מחבר",
+        progression: "Rtl",
+        primary_language: "he",
+        schema_version: "1.0"
+      },
+      paragraph_styles: [],
+      character_styles: [],
+      sections: [
+        {
+          id: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          name: "פרק ראשון",
+          page_style: "default",
+          flows: [
+            {
+              id: "primary",
+              flow_type: "Main",
+              placement_role: "primary",
+              paragraphs: [
+                {
+                  id: "01ARZ3NDEKTSV4RRFFQ69G5FA1",
+                  index: "a0",
+                  style_id: "normal",
+                  text: "טקסט ראשי של הספר הנלמד בשני טורים מקבילים בעברית."
+                }
+              ]
+            },
+            {
+              id: "commentary",
+              flow_type: "CommentA",
+              placement_role: "inner_spine",
+              paragraphs: [
+                {
+                  id: "01ARZ3NDEKTSV4RRFFQ69G5FA2",
+                  index: "a0",
+                  style_id: "normal",
+                  text: "פירוש נלווה בטור המקביל הנמצא בצד השדרה."
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    };
+
+    const tempIn = path.join(os.tmpdir(), `typeset_2flow_in_${Date.now()}.json`);
+    const tempOut = path.join(os.tmpdir(), `typeset_2flow_out_${Date.now()}.json`);
+
+    try {
+      fs.writeFileSync(tempIn, JSON.stringify(doc2Flow, null, 2), 'utf-8');
+      const exitCode = await new Promise((resolve) => {
+        const proc = spawn(tokCliPath, ['typeset-document', tempIn, tempOut], { windowsHide: true });
+        proc.on('close', resolve);
+      });
+
+      assert.equal(exitCode, 0, 'tok-cli must succeed on 2-flow document');
+      assert.ok(fs.existsSync(tempOut), 'Output JSON must be created');
+
+      const pages = JSON.parse(fs.readFileSync(tempOut, 'utf-8'));
+      assert.ok(pages.length >= 1, 'Must output at least 1 page');
+      const p0 = pages[0];
+      assert.ok(p0.frames.length >= 2, 'Page 0 must have at least 2 frames');
+
+      const primFrame = p0.frames.find((f) => f.flow_id === 'primary');
+      const commFrame = p0.frames.find((f) => f.flow_id === 'commentary');
+      assert.ok(primFrame, 'Must have primary frame');
+      assert.ok(commFrame, 'Must have commentary frame');
+      assert.ok(primFrame.lines.length >= 1, 'Primary frame must have lines');
+      assert.ok(commFrame.lines.length >= 1, 'Commentary frame must have lines');
+
+      // Primary (60%) should be wider than commentary (40%)
+      assert.ok(primFrame.rect.width > commFrame.rect.width, 'Primary column must be wider than secondary column');
+    } finally {
+      if (fs.existsSync(tempIn)) fs.unlinkSync(tempIn);
+      if (fs.existsSync(tempOut)) fs.unlinkSync(tempOut);
+    }
+  });
+
+  test('CLI MultiFlow: 4-flow Mikraot Gedolot document typesets with 4 distinct column frames via tok-cli', async () => {
+    assert.ok(tokCliPath, 'tok-cli binary must be available');
+    const { spawn } = await import('node:child_process');
+    const os = await import('node:os');
+
+    const doc4Flow = {
+      id: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      metadata: {
+        title: "מקראות גדולות ארבע זרימות",
+        author: "מחבר",
+        progression: "Rtl",
+        primary_language: "he",
+        schema_version: "1.0"
+      },
+      paragraph_styles: [],
+      character_styles: [],
+      sections: [
+        {
+          id: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          name: "פרשת בראשית",
+          page_style: "default",
+          flows: [
+            {
+              id: "torah",
+              flow_type: "Main",
+              placement_role: "primary",
+              paragraphs: [{ id: "01ARZ3NDEKTSV4RRFFQ69G5FA1", index: "a0", style_id: "normal", text: "בְּרֵאשִׁית בָּרָא אֱלֹהִים אֵת הַשָּׁמַיִם וְאֵת הָאָרֶץ." }]
+            },
+            {
+              id: "onkelos",
+              flow_type: "CommentA",
+              placement_role: "inner_spine",
+              paragraphs: [{ id: "01ARZ3NDEKTSV4RRFFQ69G5FA2", index: "a0", style_id: "normal", text: "בְּקַדְמִין בְּרָא יְיָ יָת שְׁמַיָּא וְיָת אַרְעָא." }]
+            },
+            {
+              id: "rashi",
+              flow_type: "CommentB",
+              placement_role: "outer_margin",
+              paragraphs: [{ id: "01ARZ3NDEKTSV4RRFFQ69G5FA3", index: "a0", style_id: "normal", text: "בְּרֵאשִׁית: אָמַר רַבִּי יִצְחָק לֹא הָיָה צָרִיךְ לְהַתְחִיל אֶת הַתּוֹרָה אֶלָּא מֵהַחֹדֶשׁ הַזֶּה לָכֶם." }]
+            },
+            {
+              id: "ramban",
+              flow_type: "CommentB",
+              placement_role: "column_3",
+              paragraphs: [{ id: "01ARZ3NDEKTSV4RRFFQ69G5FA4", index: "a0", style_id: "normal", text: "רמב\"ן: בראשית ברא אלהים, כתב רש\"י למה פתח בבראשית." }]
+            }
+          ]
+        }
+      ]
+    };
+
+    const tempIn = path.join(os.tmpdir(), `typeset_4flow_in_${Date.now()}.json`);
+    const tempOut = path.join(os.tmpdir(), `typeset_4flow_out_${Date.now()}.json`);
+
+    try {
+      fs.writeFileSync(tempIn, JSON.stringify(doc4Flow, null, 2), 'utf-8');
+      const exitCode = await new Promise((resolve) => {
+        const proc = spawn(tokCliPath, ['typeset-document', tempIn, tempOut], { windowsHide: true });
+        proc.on('close', resolve);
+      });
+
+      assert.equal(exitCode, 0, 'tok-cli must succeed on 4-flow document');
+      assert.ok(fs.existsSync(tempOut), 'Output JSON must be created');
+
+      const pages = JSON.parse(fs.readFileSync(tempOut, 'utf-8'));
+      assert.ok(pages.length >= 1, 'Must output at least 1 page');
+      const p0 = pages[0];
+      assert.equal(p0.frames.length, 4, 'Must allocate 4 distinct frames for Mikraot Gedolot');
+
+      const flowIds = p0.frames.map((f) => f.flow_id);
+      assert.ok(flowIds.includes('torah'), 'Must include torah frame');
+      assert.ok(flowIds.includes('onkelos'), 'Must include onkelos frame');
+      assert.ok(flowIds.includes('rashi'), 'Must include rashi frame');
+      assert.ok(flowIds.includes('ramban'), 'Must include ramban frame');
+
+      for (const frame of p0.frames) {
+        assert.ok(frame.lines.length >= 1, `Frame ${frame.flow_id} must have formatted lines`);
+        assert.ok(frame.rect.width > 30, `Frame ${frame.flow_id} width must be substantial`);
+      }
+    } finally {
+      if (fs.existsSync(tempIn)) fs.unlinkSync(tempIn);
+      if (fs.existsSync(tempOut)) fs.unlinkSync(tempOut);
+    }
+  });
 });
 
 

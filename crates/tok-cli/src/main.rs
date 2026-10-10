@@ -93,6 +93,9 @@ fn convert_multi_flow_state_to_root(raw: RawMultiFlowState) -> DocumentRoot {
     section.flows.clear();
 
     for (flow_key, paras) in raw.flows {
+        if is_prose && flow_key != "gemara" && flow_key != "main" {
+            continue;
+        }
         let (flow_id, flow_type) = match flow_key.as_str() {
             "gemara" => {
                 if is_prose {

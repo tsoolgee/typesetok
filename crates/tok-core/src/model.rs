@@ -33,6 +33,7 @@ pub struct ParagraphNode {
     pub index: FractionalIndex,
     pub style_id: String,
     pub text: String,
+    #[serde(default)]
     pub style_patches: Vec<StylePatch>,
 }
 

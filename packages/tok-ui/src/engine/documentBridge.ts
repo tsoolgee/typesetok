@@ -264,6 +264,9 @@ export function documentStateToDocumentRoot(
   const flows: FlowJson[] = [];
 
   for (const flowKey of flowKeys) {
+    if (isProse && flowKey !== 'gemara' && flowKey !== 'main') {
+      continue;
+    }
     const paras = state.flows[flowKey] || [];
     let flowId = flowKey;
     let flowType: FlowTypeJson = 'Main';
