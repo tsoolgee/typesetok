@@ -200,3 +200,215 @@ impl DocumentClassifier {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tok_core::id::FractionalIndex;
+    use tok_core::model::{Flow, FlowType, ParagraphNode, SectionNode};
+
+    fn make_flow_with_text(id: &str, flow_type: FlowType, text: &str) -> Flow {
+        let mut f = Flow::new(FlowId::new(id), flow_type);
+        f.paragraphs.push(ParagraphNode::new(
+            FractionalIndex::initial(),
+            "normal",
+            text,
+        ));
+        f
+    }
+
+    #[test]
+    fn test_classify_single_flow_prose() {
+        let mut sec = SectionNode::new("מבוא", "default");
+        sec.flows.clear();
+        sec.flows.push(make_flow_with_text("main", FlowType::Main, "טקסט רציף"));
+
+        let feat = DocumentLayoutFeatures::from_section(&sec);
+        let res = DocumentClassifier::classify(&feat);
+
+        assert_eq!(res.confidence, ClassificationConfidence::StrongStructural);
+        match res.family {
+            LayoutFamily::SingleFlow { flow_id } => assert_eq!(flow_id.0, "main"),
+            _ => panic!("Expected SingleFlow, got {:?}", res.family),
+        }
+    }
+
+    #[test]
+    fn test_classify_parallel_two_columns_unfamiliar_names() {
+        let mut sec = SectionNode::new("תרגום מקביל", "default");
+        sec.flows.clear();
+        sec.flows.push(make_flow_with_text("source_alpha", FlowType::Main, "טקסט מקור"));
+        sec.flows.push(make_flow_with_text("target_beta", FlowType::Main, "תרגום"));
+
+        let feat = DocumentLayoutFeatures::from_section(&sec);
+        let res = DocumentClassifier::classify(&feat);
+
+        assert_eq!(res.confidence, ClassificationConfidence::StrongStructural);
+        match res.family {
+            LayoutFamily::ParallelColumns { column_count, flow_ids, .. } => {
+                assert_eq!(column_count, 2);
+                assert_eq!(flow_ids.len(), 2);
+                assert_eq!(flow_ids[0].0, "source_alpha");
+                assert_eq!(flow_ids[1].0, "target_beta");
+            }
+            _ => panic!("Expected ParallelColumns, got {:?}", res.family),
+        }
+    }
+
+    #[test]
+    fn test_classify_mikraot_gedolot_four_columns() {
+        let mut sec = SectionNode::new("מקראות", "default");
+        sec.flows.clear();
+        sec.flows.push(make_flow_with_text("torah", FlowType::Main, "חומש"));
+        sec.flows.push(make_flow_with_text("targum", FlowType::Main, "תרגום"));
+        sec.flows.push(make_flow_with_text("comm_a", FlowType::Main, "פירוש א"));
+        sec.flows.push(make_flow_with_text("comm_b", FlowType::Main, "פירוש ב"));
+
+        let feat = DocumentLayoutFeatures::from_section(&sec);
+        let res = DocumentClassifier::classify(&feat);
+
+        assert_eq!(res.confidence, ClassificationConfidence::StrongStructural);
+        match res.family {
+            LayoutFamily::ParallelColumns { column_count, flow_ids, .. } => {
+                assert_eq!(column_count, 4);
+                assert_eq!(flow_ids.len(), 4);
+            }
+            _ => panic!("Expected ParallelColumns 4, got {:?}", res.family),
+        }
+    }
+
+    #[test]
+    fn test_classify_tzurat_hadaf_with_unfamiliar_flow_names() {
+        let mut sec = SectionNode::new("דף יומי", "default");
+        sec.flows.clear();
+
+        let mut primary = make_flow_with_text("central_corpus", FlowType::Main, "טקסט מרכזי");
+        primary.placement_role = Some("primary".to_string());
+        sec.flows.push(primary);
+
+        let mut inner = make_flow_with_text("spine_commentary", FlowType::CommentA, "פירוש שדרה פנימית");
+        inner.placement_role = Some("inner_spine".to_string());
+        sec.flows.push(inner);
+
+        let mut outer = make_flow_with_text("margin_gloss", FlowType::CommentB, "הערת שוליים חיצונית");
+        outer.placement_role = Some("outer_margin".to_string());
+        sec.flows.push(outer);
+
+        let feat = DocumentLayoutFeatures::from_section(&sec);
+        let res = DocumentClassifier::classify(&feat);
+
+        assert_eq!(res.confidence, ClassificationConfidence::StrongStructural);
+        match res.family {
+            LayoutFamily::TzuratHaDaf {
+                primary_flow,
+                spine_inner_flow,
+                spine_outer_flow,
+                expansion_flow,
+                has_bottom_band,
+            } => {
+                assert_eq!(primary_flow.0, "central_corpus");
+                assert_eq!(spine_inner_flow.unwrap().0, "spine_commentary");
+                assert_eq!(spine_outer_flow.unwrap().0, "margin_gloss");
+                assert_eq!(expansion_flow.unwrap().0, "margin_gloss");
+                assert!(!has_bottom_band);
+            }
+            _ => panic!("Expected TzuratHaDaf, got {:?}", res.family),
+        }
+    }
+
+    #[test]
+    fn test_classify_footnote_band() {
+        let mut sec = SectionNode::new("ספר מחקר", "default");
+        sec.flows.clear();
+        sec.flows.push(make_flow_with_text("body", FlowType::Main, "גוף המאמר"));
+        sec.flows.push(make_flow_with_text("critical_apparatus", FlowType::Footnote, "הערות"));
+
+        let feat = DocumentLayoutFeatures::from_section(&sec);
+        let res = DocumentClassifier::classify(&feat);
+
+        assert_eq!(res.confidence, ClassificationConfidence::StrongStructural);
+        match res.family {
+            LayoutFamily::FootnotesBand {
+                primary_flow,
+                footnote_flow,
+                column_flows,
+            } => {
+                assert_eq!(primary_flow.0, "body");
+                assert_eq!(footnote_flow.0, "critical_apparatus");
+                assert_eq!(column_flows.len(), 1);
+            }
+            _ => panic!("Expected FootnotesBand, got {:?}", res.family),
+        }
+    }
+
+    #[test]
+    fn test_classify_tzurat_hadaf_with_footnote_band() {
+        let mut sec = SectionNode::new("תלמוד עם מסורת", "default");
+        sec.flows.clear();
+
+        let mut gemara = make_flow_with_text("gemara", FlowType::Main, "גמרא");
+        gemara.placement_role = Some("primary".to_string());
+        sec.flows.push(gemara);
+
+        let mut rashi = make_flow_with_text("rashi", FlowType::CommentA, "רש״י");
+        rashi.placement_role = Some("inner_spine".to_string());
+        sec.flows.push(rashi);
+
+        let mut tosafot = make_flow_with_text("tosafot", FlowType::CommentB, "תוספות");
+        tosafot.placement_role = Some("outer_margin".to_string());
+        sec.flows.push(tosafot);
+
+        let notes = make_flow_with_text("masoret", FlowType::Footnote, "הערות הש״ס");
+        sec.flows.push(notes);
+
+        let feat = DocumentLayoutFeatures::from_section(&sec);
+        let res = DocumentClassifier::classify(&feat);
+
+        assert_eq!(res.confidence, ClassificationConfidence::StrongStructural);
+        match res.family {
+            LayoutFamily::TzuratHaDaf { has_bottom_band, .. } => {
+                assert!(has_bottom_band);
+            }
+            _ => panic!("Expected TzuratHaDaf with footnotes, got {:?}", res.family),
+        }
+    }
+
+    #[test]
+    fn test_explicit_hint_overrides_structural_detection() {
+        let mut sec = SectionNode::new("כפיית פרוזה", "default");
+        sec.layout_kind = Some("prose".to_string());
+        sec.flows.clear();
+        sec.flows.push(make_flow_with_text("flow1", FlowType::Main, "זרם 1"));
+        sec.flows.push(make_flow_with_text("flow2", FlowType::CommentA, "זרם 2"));
+
+        let feat = DocumentLayoutFeatures::from_section(&sec);
+        let res = DocumentClassifier::classify(&feat);
+
+        assert_eq!(res.confidence, ClassificationConfidence::Explicit);
+        match res.family {
+            LayoutFamily::SingleFlow { flow_id } => assert_eq!(flow_id.0, "flow1"),
+            _ => panic!("Expected explicit SingleFlow override, got {:?}", res.family),
+        }
+        assert!(!res.warnings.is_empty(), "Expected warning about multi-flow mismatch");
+    }
+
+    #[test]
+    fn test_unrecognized_explicit_hint_falls_back_to_structural() {
+        let mut sec = SectionNode::new("רמז לא מוכר", "default");
+        sec.layout_kind = Some("unknown_magic_layout".to_string());
+        sec.flows.clear();
+        sec.flows.push(make_flow_with_text("col_1", FlowType::Main, "טור 1"));
+        sec.flows.push(make_flow_with_text("col_2", FlowType::Main, "טור 2"));
+
+        let feat = DocumentLayoutFeatures::from_section(&sec);
+        let res = DocumentClassifier::classify(&feat);
+
+        assert_eq!(res.confidence, ClassificationConfidence::StrongStructural);
+        match res.family {
+            LayoutFamily::ParallelColumns { column_count, .. } => assert_eq!(column_count, 2),
+            _ => panic!("Expected fallback to ParallelColumns, got {:?}", res.family),
+        }
+        assert!(res.warnings.iter().any(|w| w.contains("Unrecognized explicit layout hint")));
+    }
+}
+
