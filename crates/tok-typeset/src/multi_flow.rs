@@ -818,4 +818,106 @@ mod tests {
             assert!(allocs[i].allocated_x_pt + allocs[i].allocated_width_pt <= allocs[i + 1].allocated_x_pt + 1e-3);
         }
     }
+
+    #[test]
+    fn test_generalized_l_shape_expansion_custom_flows() {
+        let flows = vec![
+            FlowGeometrySpec::new(FlowId("main_text".into()), 1).with_role(FlowPlacementRole::Primary),
+            FlowGeometrySpec::new(FlowId("commentary".into()), 2).with_role(FlowPlacementRole::InnerSpine),
+        ];
+
+        let result = MultiFlowSolver::solve_dynamic_spread_with_footnotes(
+            595.0,
+            842.0,
+            40.0,
+            20.0,
+            36.0,
+            &flows,
+            SpreadSide::Recto,
+            Some(250.0),
+            None,
+            None,
+        );
+
+        assert!(result.has_l_shape_expansion);
+        let main_alloc = result.allocations.iter().find(|a| a.flow_id.0 == "main_text").unwrap();
+        let exp_alloc = result.allocations.iter().find(|a| a.flow_id.0 == "commentary_expansion").unwrap();
+        assert_eq!(main_alloc.allocated_height_pt, 250.0);
+        assert_eq!(exp_alloc.allocated_x_pt, main_alloc.allocated_x_pt);
+        assert_eq!(exp_alloc.allocated_width_pt, main_alloc.allocated_width_pt);
+        assert!(exp_alloc.allocated_y_pt > main_alloc.allocated_y_pt + main_alloc.allocated_height_pt);
+
+        for (i, a) in result.allocations.iter().enumerate() {
+            for b in &result.allocations[i + 1..] {
+                assert!(!overlaps(a, b), "{:?} overlaps {:?}", a.flow_id, b.flow_id);
+            }
+        }
+    }
+
+    #[test]
+    fn test_generalized_l_shape_with_custom_expansion_id() {
+        let flows = vec![
+            FlowGeometrySpec::new(FlowId("chumash".into()), 1).with_role(FlowPlacementRole::Primary),
+            FlowGeometrySpec::new(FlowId("targum".into()), 2).with_role(FlowPlacementRole::InnerSpine),
+            FlowGeometrySpec::new(FlowId("rashi".into()), 3).with_role(FlowPlacementRole::OuterMargin),
+        ];
+
+        let exp_id = FlowId("rashi".into());
+        let result = MultiFlowSolver::solve_dynamic_spread_with_footnotes(
+            595.0,
+            842.0,
+            36.0,
+            36.0,
+            36.0,
+            &flows,
+            SpreadSide::Recto,
+            Some(300.0),
+            None,
+            Some(&exp_id),
+        );
+
+        assert!(result.has_l_shape_expansion);
+        assert!(result.allocations.iter().any(|a| a.flow_id.0 == "rashi_expansion"));
+        for (i, a) in result.allocations.iter().enumerate() {
+            for b in &result.allocations[i + 1..] {
+                assert!(!overlaps(a, b), "{:?} overlaps {:?}", a.flow_id, b.flow_id);
+            }
+        }
+    }
+
+    #[test]
+    fn test_generalized_l_shape_with_bottom_band_flow() {
+        let flows = vec![
+            FlowGeometrySpec::new(FlowId("primary".into()), 1).with_role(FlowPlacementRole::Primary),
+            FlowGeometrySpec::new(FlowId("perush".into()), 2).with_role(FlowPlacementRole::InnerSpine),
+            FlowGeometrySpec::new(FlowId("heorot".into()), 3).with_role(FlowPlacementRole::BottomBand),
+        ];
+
+        let result = MultiFlowSolver::solve_dynamic_spread_with_footnotes(
+            595.0,
+            842.0,
+            36.0,
+            36.0,
+            36.0,
+            &flows,
+            SpreadSide::Verso,
+            Some(200.0),
+            Some(100.0),
+            None,
+        );
+
+        assert!(result.has_l_shape_expansion);
+        assert!(result.footnote_allocation.is_some());
+        let fn_alloc = result.footnote_allocation.unwrap();
+        assert_eq!(fn_alloc.flow_id.0, "heorot");
+        assert_eq!(fn_alloc.allocated_height_pt, 100.0);
+
+        let mut all = result.allocations.clone();
+        all.push(fn_alloc);
+        for (i, a) in all.iter().enumerate() {
+            for b in &all[i + 1..] {
+                assert!(!overlaps(a, b), "{:?} overlaps {:?}", a.flow_id, b.flow_id);
+            }
+        }
+    }
 }
