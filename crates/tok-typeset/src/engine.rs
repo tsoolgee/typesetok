@@ -756,6 +756,28 @@ impl TypesettingEngine {
 
             let footnote_target = if has_notes { Some(50.0) } else { None };
 
+            // Determine if primary stream finishes early on this page
+            let primary_spec = flow_specs
+                .iter()
+                .find(|s| s.role == FlowPlacementRole::Primary);
+            let primary_target_h = if let Some(p_spec) = primary_spec {
+                let p_cursor = flow_cursors.get(&p_spec.flow_id.0).copied().unwrap_or(0);
+                if let Some(lines) = flow_lines_map.get(&p_spec.flow_id.0) {
+                    let remaining_lines = &lines[p_cursor..];
+                    let rem_h: f32 = remaining_lines.iter().map(|l| l.height).sum();
+                    let max_h = self.config.page_height_pt - 2.0 * self.config.margin_top_pt;
+                    if rem_h > 0.0 && rem_h < max_h - MultiFlowSolver::L_SHAPE_MIN_GAP_PT {
+                        Some(rem_h)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
             let expansion_id = first_sec.expansion_flow_id.as_ref();
             let dynamic_result = MultiFlowSolver::solve_dynamic_spread_with_footnotes(
                 self.config.page_width_pt,
@@ -765,7 +787,7 @@ impl TypesettingEngine {
                 self.config.margin_top_pt,
                 &flow_specs,
                 side,
-                None,
+                primary_target_h,
                 footnote_target,
                 expansion_id,
             );
@@ -775,14 +797,76 @@ impl TypesettingEngine {
 
             // Place commentary & main columns
             for alloc in &dynamic_result.allocations {
-                let lines_pool = flow_lines_map.get(&alloc.flow_id.0);
-                let cursor = flow_cursors.get(&alloc.flow_id.0).copied().unwrap_or(0);
+                let (is_expansion, source_id) =
+                    if let Some(base) = alloc.flow_id.0.strip_suffix("_expansion") {
+                        (true, base)
+                    } else {
+                        (false, alloc.flow_id.0.as_str())
+                    };
+
+                let cursor = flow_cursors.get(source_id).copied().unwrap_or(0);
+
+                let (lines_pool, is_dynamic_expansion_pool) = if is_expansion {
+                    let base_flow = first_sec.flows.iter().find(|f| f.id.0 == source_id);
+                    let base_lines = flow_lines_map.get(source_id);
+
+                    if let (Some(b_flow), Some(b_lines)) = (base_flow, base_lines) {
+                        if cursor < b_lines.len() {
+                            let placed_p_ids: std::collections::HashSet<_> = b_lines[..cursor]
+                                .iter()
+                                .filter_map(|l| l.paragraph_id)
+                                .collect();
+
+                            let mut exp_lines = Vec::new();
+                            for p in &b_flow.paragraphs {
+                                if !placed_p_ids.contains(&p.id) {
+                                    let (font_family, font_size, line_height) = doc
+                                        .paragraph_styles
+                                        .iter()
+                                        .find(|s| s.id == p.style_id)
+                                        .map(|style| {
+                                            (
+                                                self.font_manager
+                                                    .face_for(&style.font_family, style.font_weight),
+                                                style.font_size_pt,
+                                                style.line_height_pt,
+                                            )
+                                        })
+                                        .unwrap_or_else(|| {
+                                            ("Noto Rashi Hebrew".to_string(), 10.5, 10.5 * 1.45)
+                                        });
+
+                                    let p_lines = self.typeset_paragraph_with_font(
+                                        p,
+                                        &font_family,
+                                        alloc.allocated_width_pt,
+                                        font_size,
+                                        line_height,
+                                    );
+                                    exp_lines.extend(p_lines);
+                                }
+                            }
+                            if !exp_lines.is_empty() {
+                                (Some(exp_lines), true)
+                            } else {
+                                (Some(b_lines[cursor..].to_vec()), true)
+                            }
+                        } else {
+                            (None, false)
+                        }
+                    } else {
+                        (None, false)
+                    }
+                } else {
+                    (flow_lines_map.get(source_id).cloned(), false)
+                };
 
                 let mut frame_lines = Vec::new();
                 let mut current_h = 0.0;
 
                 if let Some(pool) = lines_pool {
-                    let mut idx = cursor;
+                    let start_idx = if is_dynamic_expansion_pool { 0 } else { cursor };
+                    let mut idx = start_idx;
                     while idx < pool.len() {
                         let l = &pool[idx];
                         if current_h + l.height > alloc.allocated_height_pt
@@ -797,10 +881,16 @@ impl TypesettingEngine {
                         frame_lines.push(positioned_line);
                         idx += 1;
                     }
-                    if idx > cursor {
-                        flow_cursors.insert(alloc.flow_id.0.clone(), idx);
+
+                    let lines_placed = idx - start_idx;
+                    if lines_placed > 0 {
+                        flow_cursors.insert(source_id.to_string(), cursor + lines_placed);
                         any_lines_placed = true;
                     }
+                }
+
+                if is_expansion && frame_lines.is_empty() {
+                    continue;
                 }
 
                 page_frames.push(TextFrameBox {

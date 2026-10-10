@@ -136,7 +136,7 @@ impl MultiFlowSolver {
     pub const MAX_ITERATIONS: usize = 1000;
     pub const DEFAULT_GUTTER_PT: f32 = 12.0;
     /// Minimum gap between Gemara bottom and the free space that triggers the L-shape.
-    const L_SHAPE_MIN_GAP_PT: f32 = 30.0;
+    pub const L_SHAPE_MIN_GAP_PT: f32 = 30.0;
 
     fn margins(margin_inner_pt: f32, margin_outer_pt: f32, side: SpreadSide) -> (f32, f32) {
         match side {
