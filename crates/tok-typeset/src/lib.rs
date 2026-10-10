@@ -13,12 +13,14 @@ pub mod layout_features;
 pub mod layout_template;
 pub mod multi_flow;
 pub mod shaper;
+pub mod template_synthesizer;
 
 pub use bidi::{BidiEngine, BidiRun};
 pub use layout_classifier::{ClassificationConfidence, ClassificationResult, DocumentClassifier};
 pub use layout_family::LayoutFamily;
 pub use layout_features::{DocumentLayoutFeatures, FlowFeature};
 pub use layout_template::{LayoutTemplate, TemplateConstraintError};
+pub use template_synthesizer::TemplateSynthesizer;
 pub use co_pagination::{
     ActiveSyncResult, ActiveSynchronizer, AnchorKey, AnchorPoint, CancellationToken,
     CoPaginatedChunk, CoPaginatedCommentary, CoPaginatedPage, CoPaginationDocument,
