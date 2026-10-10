@@ -40,10 +40,7 @@ pub enum SyncRemedy {
     TolerableLag { lag_pt: f32 },
     /// Commentary lag is too large to solve on this page; the central text must be cut
     /// and pushed to the subsequent page along with this commentary item.
-    RequirePageCut {
-        anchor_key: AnchorKey,
-        lag_pt: f32,
-    },
+    RequirePageCut { anchor_key: AnchorKey, lag_pt: f32 },
     /// Commentary leads by more than the maximum permissible vertical spring.
     ExcessiveLead { lead_pt: f32 },
 }

@@ -375,7 +375,9 @@ mod tests {
         ));
         sec.flows.push(notes_flow);
 
-        let json = root.to_json().expect("Multi-flow serialization must succeed");
+        let json = root
+            .to_json()
+            .expect("Multi-flow serialization must succeed");
         let restored = DocumentRoot::from_json(&json).expect("Deserialization must succeed");
 
         assert_eq!(restored.metadata.title, "דף גמרא - ברכות");
@@ -409,7 +411,10 @@ mod tests {
         assert_eq!(p.text, HebrewNormalizer::normalize(text_with_niqqud));
 
         let mut root = DocumentRoot::new("מנוקד");
-        root.sections[0].main_flow_mut().unwrap().add_paragraph(p.clone());
+        root.sections[0]
+            .main_flow_mut()
+            .unwrap()
+            .add_paragraph(p.clone());
 
         let json = root.to_json().unwrap();
         let loaded = DocumentRoot::from_json(&json).unwrap();
@@ -457,11 +462,20 @@ mod tests {
         assert_eq!(loaded_sec.expansion_flow_id, Some(FlowId::new("rashi")));
 
         assert_eq!(loaded_sec.flows[0].width_ratio, Some(0.40));
-        assert_eq!(loaded_sec.flows[0].placement_role.as_deref(), Some("primary"));
+        assert_eq!(
+            loaded_sec.flows[0].placement_role.as_deref(),
+            Some("primary")
+        );
         assert_eq!(loaded_sec.flows[1].width_ratio, Some(0.28));
-        assert_eq!(loaded_sec.flows[1].placement_role.as_deref(), Some("inner_spine"));
+        assert_eq!(
+            loaded_sec.flows[1].placement_role.as_deref(),
+            Some("inner_spine")
+        );
         assert_eq!(loaded_sec.flows[2].width_ratio, Some(0.32));
-        assert_eq!(loaded_sec.flows[2].placement_role.as_deref(), Some("outer_margin"));
+        assert_eq!(
+            loaded_sec.flows[2].placement_role.as_deref(),
+            Some("outer_margin")
+        );
     }
 
     #[test]
@@ -519,7 +533,10 @@ mod tests {
         assert!(sec.has_flow("stream_b"));
         assert!(sec.has_flow("stream_c"));
         assert!(!sec.has_flow("stream_d"));
-        assert_eq!(sec.find_flow("stream_b").unwrap().flow_type, FlowType::CommentA);
+        assert_eq!(
+            sec.find_flow("stream_b").unwrap().flow_type,
+            FlowType::CommentA
+        );
         assert_eq!(sec.layout_kind.as_deref(), Some("parallel_columns"));
         assert_eq!(sec.column_proportions, Some(vec![0.6, 0.4]));
     }

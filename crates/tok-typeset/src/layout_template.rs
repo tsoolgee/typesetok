@@ -20,19 +20,14 @@ pub enum TemplateConstraintError {
         printable_height_pt: f32,
     },
     /// Invalid or non-finite width proportions.
-    InvalidProportions {
-        message: String,
-    },
+    InvalidProportions { message: String },
     /// The number of column proportions does not match the number of allocated columns.
     ProportionCountMismatch {
         proportions_count: usize,
         columns_count: usize,
     },
     /// A referenced flow ID (e.g. expansion flow or footnote) does not exist in the flow specs.
-    MissingReferencedFlow {
-        role: &'static str,
-        flow_id: FlowId,
-    },
+    MissingReferencedFlow { role: &'static str, flow_id: FlowId },
     /// Duplicate flow ID encountered in flow geometry specifications.
     DuplicateFlowId(FlowId),
 }
@@ -41,15 +36,23 @@ impl fmt::Display for TemplateConstraintError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::EmptyFlowSpecs => write!(f, "Template contains no flow specifications"),
-            Self::InsufficientPageGeometry { printable_width_pt, printable_height_pt } => {
+            Self::InsufficientPageGeometry {
+                printable_width_pt,
+                printable_height_pt,
+            } => {
                 write!(
                     f,
                     "Printable page area is non-positive (width: {:.2} pt, height: {:.2} pt)",
                     printable_width_pt, printable_height_pt
                 )
             }
-            Self::InvalidProportions { message } => write!(f, "Invalid width proportions: {}", message),
-            Self::ProportionCountMismatch { proportions_count, columns_count } => {
+            Self::InvalidProportions { message } => {
+                write!(f, "Invalid width proportions: {}", message)
+            }
+            Self::ProportionCountMismatch {
+                proportions_count,
+                columns_count,
+            } => {
                 write!(
                     f,
                     "Proportion count ({}) does not match column count ({})",
@@ -57,7 +60,11 @@ impl fmt::Display for TemplateConstraintError {
                 )
             }
             Self::MissingReferencedFlow { role, flow_id } => {
-                write!(f, "Referenced {} flow '{}' does not exist in template", role, flow_id.0)
+                write!(
+                    f,
+                    "Referenced {} flow '{}' does not exist in template",
+                    role, flow_id.0
+                )
             }
             Self::DuplicateFlowId(id) => write!(f, "Duplicate flow ID '{}' in template", id.0),
         }
@@ -116,7 +123,11 @@ impl LayoutTemplate {
 
         let printable_w = page_width_pt - margin_x_total_pt;
         let printable_h = page_height_pt - margin_y_total_pt;
-        if printable_w <= 0.0 || printable_h <= 0.0 || !printable_w.is_finite() || !printable_h.is_finite() {
+        if printable_w <= 0.0
+            || printable_h <= 0.0
+            || !printable_w.is_finite()
+            || !printable_h.is_finite()
+        {
             return Err(TemplateConstraintError::InsufficientPageGeometry {
                 printable_width_pt: printable_w,
                 printable_height_pt: printable_h,
@@ -127,7 +138,9 @@ impl LayoutTemplate {
         let mut seen_ids = HashSet::new();
         for spec in &self.flow_specs {
             if !seen_ids.insert(&spec.flow_id) {
-                return Err(TemplateConstraintError::DuplicateFlowId(spec.flow_id.clone()));
+                return Err(TemplateConstraintError::DuplicateFlowId(
+                    spec.flow_id.clone(),
+                ));
             }
         }
 
@@ -164,7 +177,10 @@ impl LayoutTemplate {
             let sum: f32 = self.nominal_proportions.iter().sum();
             if sum <= 0.0 || !sum.is_finite() {
                 return Err(TemplateConstraintError::InvalidProportions {
-                    message: format!("Sum of proportions ({:.3}) must be strictly positive and finite", sum),
+                    message: format!(
+                        "Sum of proportions ({:.3}) must be strictly positive and finite",
+                        sum
+                    ),
                 });
             }
 
@@ -187,7 +203,9 @@ mod tests {
 
     #[test]
     fn test_valid_template_validation() {
-        let mut t = LayoutTemplate::new(LayoutFamily::SingleFlow { flow_id: FlowId::main() });
+        let mut t = LayoutTemplate::new(LayoutFamily::SingleFlow {
+            flow_id: FlowId::main(),
+        });
         t.flow_specs.push(FlowGeometrySpec::new(FlowId::main(), 1));
         t.nominal_proportions = vec![1.0];
 
@@ -197,20 +215,26 @@ mod tests {
 
     #[test]
     fn test_empty_flow_specs_error() {
-        let t = LayoutTemplate::new(LayoutFamily::SingleFlow { flow_id: FlowId::main() });
+        let t = LayoutTemplate::new(LayoutFamily::SingleFlow {
+            flow_id: FlowId::main(),
+        });
         let res = t.validate(595.0, 842.0, 80.0, 72.0);
         assert_eq!(res, Err(TemplateConstraintError::EmptyFlowSpecs));
     }
 
     #[test]
     fn test_insufficient_page_geometry_error() {
-        let mut t = LayoutTemplate::new(LayoutFamily::SingleFlow { flow_id: FlowId::main() });
+        let mut t = LayoutTemplate::new(LayoutFamily::SingleFlow {
+            flow_id: FlowId::main(),
+        });
         t.flow_specs.push(FlowGeometrySpec::new(FlowId::main(), 1));
 
         // Margins exceed page width (595.0 < 600.0)
         let res = t.validate(595.0, 842.0, 600.0, 72.0);
         match res {
-            Err(TemplateConstraintError::InsufficientPageGeometry { printable_width_pt, .. }) => {
+            Err(TemplateConstraintError::InsufficientPageGeometry {
+                printable_width_pt, ..
+            }) => {
                 assert!(printable_width_pt <= 0.0);
             }
             other => panic!("Expected InsufficientPageGeometry, got {:?}", other),
@@ -224,11 +248,16 @@ mod tests {
             proportions: None,
             flow_ids: vec![FlowId::new("col"), FlowId::new("col")],
         });
-        t.flow_specs.push(FlowGeometrySpec::new(FlowId::new("col"), 1));
-        t.flow_specs.push(FlowGeometrySpec::new(FlowId::new("col"), 2));
+        t.flow_specs
+            .push(FlowGeometrySpec::new(FlowId::new("col"), 1));
+        t.flow_specs
+            .push(FlowGeometrySpec::new(FlowId::new("col"), 2));
 
         let res = t.validate(595.0, 842.0, 80.0, 72.0);
-        assert_eq!(res, Err(TemplateConstraintError::DuplicateFlowId(FlowId::new("col"))));
+        assert_eq!(
+            res,
+            Err(TemplateConstraintError::DuplicateFlowId(FlowId::new("col")))
+        );
     }
 
     #[test]
@@ -240,9 +269,12 @@ mod tests {
             expansion_flow: Some(FlowId::new("non_existent_stream")),
             has_bottom_band: false,
         });
-        t.flow_specs.push(FlowGeometrySpec::new(FlowId::new("gemara"), 1));
-        t.flow_specs.push(FlowGeometrySpec::new(FlowId::new("rashi"), 2));
-        t.flow_specs.push(FlowGeometrySpec::new(FlowId::new("tosafot"), 3));
+        t.flow_specs
+            .push(FlowGeometrySpec::new(FlowId::new("gemara"), 1));
+        t.flow_specs
+            .push(FlowGeometrySpec::new(FlowId::new("rashi"), 2));
+        t.flow_specs
+            .push(FlowGeometrySpec::new(FlowId::new("tosafot"), 3));
         t.expansion_flow_id = Some(FlowId::new("non_existent_stream"));
 
         let res = t.validate(595.0, 842.0, 80.0, 72.0);
@@ -262,8 +294,10 @@ mod tests {
             proportions: Some(vec![0.5, 0.3, 0.2]),
             flow_ids: vec![FlowId::new("c1"), FlowId::new("c2")],
         });
-        t.flow_specs.push(FlowGeometrySpec::new(FlowId::new("c1"), 1));
-        t.flow_specs.push(FlowGeometrySpec::new(FlowId::new("c2"), 2));
+        t.flow_specs
+            .push(FlowGeometrySpec::new(FlowId::new("c1"), 1));
+        t.flow_specs
+            .push(FlowGeometrySpec::new(FlowId::new("c2"), 2));
         t.nominal_proportions = vec![0.5, 0.3, 0.2]; // 3 proportions for 2 columns
 
         let res = t.validate(595.0, 842.0, 80.0, 72.0);
@@ -283,8 +317,10 @@ mod tests {
             proportions: Some(vec![0.5, -0.1]),
             flow_ids: vec![FlowId::new("c1"), FlowId::new("c2")],
         });
-        t.flow_specs.push(FlowGeometrySpec::new(FlowId::new("c1"), 1));
-        t.flow_specs.push(FlowGeometrySpec::new(FlowId::new("c2"), 2));
+        t.flow_specs
+            .push(FlowGeometrySpec::new(FlowId::new("c1"), 1));
+        t.flow_specs
+            .push(FlowGeometrySpec::new(FlowId::new("c2"), 2));
         t.nominal_proportions = vec![0.5, -0.1];
 
         let res = t.validate(595.0, 842.0, 80.0, 72.0);
@@ -296,4 +332,3 @@ mod tests {
         }
     }
 }
-

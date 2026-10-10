@@ -28,7 +28,11 @@ impl TemplateSynthesizer {
             LayoutFamily::SingleFlow { flow_id } => {
                 Self::synthesize_single_flow(&mut template, section, flow_id)?;
             }
-            LayoutFamily::ParallelColumns { column_count, proportions, flow_ids } => {
+            LayoutFamily::ParallelColumns {
+                column_count,
+                proportions,
+                flow_ids,
+            } => {
                 Self::synthesize_parallel_columns(
                     &mut template,
                     section,
@@ -404,14 +408,16 @@ mod tests {
         let doc = DocumentRoot::new("מסמך יחיד");
         let mut sec = SectionNode::new("שער א", "default");
         sec.flows.clear();
-        sec.flows.push(Flow::new(FlowId::new("prose_body"), FlowType::Main));
+        sec.flows
+            .push(Flow::new(FlowId::new("prose_body"), FlowType::Main));
 
         let family = LayoutFamily::SingleFlow {
             flow_id: FlowId::new("prose_body"),
         };
 
-        let template = TemplateSynthesizer::synthesize(&doc, &sec, &family, 595.0, 842.0, 80.0, 72.0)
-            .expect("Synthesis must succeed");
+        let template =
+            TemplateSynthesizer::synthesize(&doc, &sec, &family, 595.0, 842.0, 80.0, 72.0)
+                .expect("Synthesis must succeed");
 
         assert_eq!(template.flow_specs.len(), 1);
         assert_eq!(template.flow_specs[0].flow_id.0, "prose_body");
@@ -426,8 +432,10 @@ mod tests {
         let doc = DocumentRoot::new("מקבילים");
         let mut sec = SectionNode::new("תרגום", "default");
         sec.flows.clear();
-        sec.flows.push(Flow::new(FlowId::new("lang_a"), FlowType::Main));
-        sec.flows.push(Flow::new(FlowId::new("lang_b"), FlowType::Main));
+        sec.flows
+            .push(Flow::new(FlowId::new("lang_a"), FlowType::Main));
+        sec.flows
+            .push(Flow::new(FlowId::new("lang_b"), FlowType::Main));
 
         let family = LayoutFamily::ParallelColumns {
             column_count: 2,
@@ -435,8 +443,9 @@ mod tests {
             flow_ids: vec![FlowId::new("lang_a"), FlowId::new("lang_b")],
         };
 
-        let template = TemplateSynthesizer::synthesize(&doc, &sec, &family, 595.0, 842.0, 80.0, 72.0)
-            .expect("Synthesis must succeed");
+        let template =
+            TemplateSynthesizer::synthesize(&doc, &sec, &family, 595.0, 842.0, 80.0, 72.0)
+                .expect("Synthesis must succeed");
 
         assert_eq!(template.flow_specs.len(), 2);
         assert_eq!(template.nominal_proportions, vec![0.5, 0.5]);
@@ -449,10 +458,14 @@ mod tests {
         let doc = DocumentRoot::new("מקראות גדולות");
         let mut sec = SectionNode::new("בראשית", "default");
         sec.flows.clear();
-        sec.flows.push(Flow::new(FlowId::new("torah"), FlowType::Main));
-        sec.flows.push(Flow::new(FlowId::new("onkelos"), FlowType::CommentA));
-        sec.flows.push(Flow::new(FlowId::new("rashi"), FlowType::CommentB));
-        sec.flows.push(Flow::new(FlowId::new("ramban"), FlowType::CommentB));
+        sec.flows
+            .push(Flow::new(FlowId::new("torah"), FlowType::Main));
+        sec.flows
+            .push(Flow::new(FlowId::new("onkelos"), FlowType::CommentA));
+        sec.flows
+            .push(Flow::new(FlowId::new("rashi"), FlowType::CommentB));
+        sec.flows
+            .push(Flow::new(FlowId::new("ramban"), FlowType::CommentB));
 
         let family = LayoutFamily::ParallelColumns {
             column_count: 4,
@@ -465,8 +478,9 @@ mod tests {
             ],
         };
 
-        let template = TemplateSynthesizer::synthesize(&doc, &sec, &family, 595.0, 842.0, 80.0, 72.0)
-            .expect("Synthesis must succeed");
+        let template =
+            TemplateSynthesizer::synthesize(&doc, &sec, &family, 595.0, 842.0, 80.0, 72.0)
+                .expect("Synthesis must succeed");
 
         assert_eq!(template.flow_specs.len(), 4);
         assert_eq!(template.column_count(), 4);
@@ -479,13 +493,17 @@ mod tests {
     fn test_synthesize_fails_on_impossible_dimensions() {
         let doc = DocumentRoot::new("שגיאת ממדים");
         let sec = SectionNode::new("שגיאה", "default");
-        let family = LayoutFamily::SingleFlow { flow_id: FlowId::main() };
+        let family = LayoutFamily::SingleFlow {
+            flow_id: FlowId::main(),
+        };
 
         // Margin (600pt) exceeds page width (500pt)
         let err = TemplateSynthesizer::synthesize(&doc, &sec, &family, 500.0, 842.0, 600.0, 72.0);
         assert!(err.is_err());
         match err {
-            Err(TemplateConstraintError::InsufficientPageGeometry { printable_width_pt, .. }) => {
+            Err(TemplateConstraintError::InsufficientPageGeometry {
+                printable_width_pt, ..
+            }) => {
                 assert!(printable_width_pt < 0.0);
             }
             other => panic!("Expected InsufficientPageGeometry, got {:?}", other),
@@ -497,9 +515,12 @@ mod tests {
         let doc = DocumentRoot::new("תלמוד כללי");
         let mut sec = SectionNode::new("דף כג", "default");
         sec.flows.clear();
-        sec.flows.push(Flow::new(FlowId::new("primary_text"), FlowType::Main));
-        sec.flows.push(Flow::new(FlowId::new("spine_comm"), FlowType::CommentA));
-        sec.flows.push(Flow::new(FlowId::new("outer_comm"), FlowType::CommentB));
+        sec.flows
+            .push(Flow::new(FlowId::new("primary_text"), FlowType::Main));
+        sec.flows
+            .push(Flow::new(FlowId::new("spine_comm"), FlowType::CommentA));
+        sec.flows
+            .push(Flow::new(FlowId::new("outer_comm"), FlowType::CommentB));
 
         let family = LayoutFamily::TzuratHaDaf {
             primary_flow: FlowId::new("primary_text"),
@@ -509,8 +530,9 @@ mod tests {
             has_bottom_band: false,
         };
 
-        let template = TemplateSynthesizer::synthesize(&doc, &sec, &family, 595.0, 842.0, 80.0, 72.0)
-            .expect("Synthesis must succeed");
+        let template =
+            TemplateSynthesizer::synthesize(&doc, &sec, &family, 595.0, 842.0, 80.0, 72.0)
+                .expect("Synthesis must succeed");
 
         assert_eq!(template.flow_specs.len(), 3);
         assert_eq!(template.flow_specs[0].role, FlowPlacementRole::Primary);
@@ -530,10 +552,14 @@ mod tests {
         let doc = DocumentRoot::new("תלמוד עם הערות");
         let mut sec = SectionNode::new("דף כד", "default");
         sec.flows.clear();
-        sec.flows.push(Flow::new(FlowId::new("core"), FlowType::Main));
-        sec.flows.push(Flow::new(FlowId::new("inner"), FlowType::CommentA));
-        sec.flows.push(Flow::new(FlowId::new("outer"), FlowType::CommentB));
-        sec.flows.push(Flow::new(FlowId::new("bottom_notes"), FlowType::Footnote));
+        sec.flows
+            .push(Flow::new(FlowId::new("core"), FlowType::Main));
+        sec.flows
+            .push(Flow::new(FlowId::new("inner"), FlowType::CommentA));
+        sec.flows
+            .push(Flow::new(FlowId::new("outer"), FlowType::CommentB));
+        sec.flows
+            .push(Flow::new(FlowId::new("bottom_notes"), FlowType::Footnote));
 
         let family = LayoutFamily::TzuratHaDaf {
             primary_flow: FlowId::new("core"),
@@ -543,15 +569,19 @@ mod tests {
             has_bottom_band: true,
         };
 
-        let template = TemplateSynthesizer::synthesize(&doc, &sec, &family, 595.0, 842.0, 80.0, 72.0)
-            .expect("Synthesis must succeed");
+        let template =
+            TemplateSynthesizer::synthesize(&doc, &sec, &family, 595.0, 842.0, 80.0, 72.0)
+                .expect("Synthesis must succeed");
 
         assert_eq!(template.flow_specs.len(), 4);
         assert_eq!(template.column_count(), 3);
         assert!(template.has_bottom_band);
         assert_eq!(template.footnote_flow_id, Some(FlowId::new("bottom_notes")));
 
-        let fn_spec = template.flow_specs.iter().find(|s| s.role == FlowPlacementRole::BottomBand);
+        let fn_spec = template
+            .flow_specs
+            .iter()
+            .find(|s| s.role == FlowPlacementRole::BottomBand);
         assert!(fn_spec.is_some());
         assert_eq!(fn_spec.unwrap().flow_id.0, "bottom_notes");
     }
@@ -561,8 +591,10 @@ mod tests {
         let doc = DocumentRoot::new("מחקר עם הערות");
         let mut sec = SectionNode::new("פרק א", "default");
         sec.flows.clear();
-        sec.flows.push(Flow::new(FlowId::new("body_text"), FlowType::Main));
-        sec.flows.push(Flow::new(FlowId::new("footnotes"), FlowType::Footnote));
+        sec.flows
+            .push(Flow::new(FlowId::new("body_text"), FlowType::Main));
+        sec.flows
+            .push(Flow::new(FlowId::new("footnotes"), FlowType::Footnote));
 
         let family = LayoutFamily::FootnotesBand {
             primary_flow: FlowId::new("body_text"),
@@ -570,8 +602,9 @@ mod tests {
             column_flows: vec![FlowId::new("body_text")],
         };
 
-        let template = TemplateSynthesizer::synthesize(&doc, &sec, &family, 595.0, 842.0, 80.0, 72.0)
-            .expect("Synthesis must succeed");
+        let template =
+            TemplateSynthesizer::synthesize(&doc, &sec, &family, 595.0, 842.0, 80.0, 72.0)
+                .expect("Synthesis must succeed");
 
         assert_eq!(template.flow_specs.len(), 2);
         assert_eq!(template.column_count(), 1);
@@ -581,4 +614,3 @@ mod tests {
         assert!(!template.has_l_shape_expansion);
     }
 }
-

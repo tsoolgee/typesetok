@@ -5,7 +5,9 @@
 //! - Emits completed [`CoPaginatedPage`]s progressively via channels (page streaming).
 //! - Supports cooperative cancellation via [`CancellationToken`] when the user edits or navigates away.
 
-use super::engine::{CoPaginatedPage, CoPaginationDocument, CoPaginationEngine, CoPaginationResult};
+use super::engine::{
+    CoPaginatedPage, CoPaginationDocument, CoPaginationEngine, CoPaginationResult,
+};
 use super::sync::SynchronizerConfig;
 use super::template::TemplateConfig;
 use crate::engine::TypesettingEngine;

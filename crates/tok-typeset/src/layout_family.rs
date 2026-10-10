@@ -9,9 +9,7 @@ use tok_core::FlowId;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum LayoutFamily {
     /// Single continuous column (prose, running text, standard novels).
-    SingleFlow {
-        flow_id: FlowId,
-    },
+    SingleFlow { flow_id: FlowId },
     /// Parallel columns of equal or custom proportions (bilingual, 2-column, Mikraot Gedolot 4-column).
     ParallelColumns {
         column_count: usize,
@@ -34,9 +32,7 @@ pub enum LayoutFamily {
         column_flows: Vec<FlowId>,
     },
     /// Fully custom user-defined geometric constraints.
-    CustomConstraints {
-        flow_ids: Vec<FlowId>,
-    },
+    CustomConstraints { flow_ids: Vec<FlowId> },
 }
 
 impl LayoutFamily {
@@ -55,14 +51,12 @@ impl LayoutFamily {
     pub fn display_name_he(&self) -> &'static str {
         match self {
             Self::SingleFlow { .. } => "זרם יחיד (פרוזה וספר רציף)",
-            Self::ParallelColumns { column_count, .. } => {
-                match column_count {
-                    2 => "שני טורים מקבילים",
-                    3 => "שלושה טורים מקבילים",
-                    4 => "מקראות גדולות (ארבעה טורים)",
-                    _ => "טורים מקבילים",
-                }
-            }
+            Self::ParallelColumns { column_count, .. } => match column_count {
+                2 => "שני טורים מקבילים",
+                3 => "שלושה טורים מקבילים",
+                4 => "מקראות גדולות (ארבעה טורים)",
+                _ => "טורים מקבילים",
+            },
             Self::TzuratHaDaf { .. } => "צורת הדף (ש\"ס עם הרחבת פירוש)",
             Self::FootnotesBand { .. } => "רצועת הערות שוליים תחתונה",
             Self::CustomConstraints { .. } => "פריסת אילוצים מותאמת אישית",
@@ -82,7 +76,13 @@ impl LayoutFamily {
     /// Whether this layout includes a dedicated bottom footnote band.
     pub fn has_footnotes(&self) -> bool {
         matches!(self, Self::FootnotesBand { .. })
-            || matches!(self, Self::TzuratHaDaf { has_bottom_band: true, .. })
+            || matches!(
+                self,
+                Self::TzuratHaDaf {
+                    has_bottom_band: true,
+                    ..
+                }
+            )
     }
 
     /// Attempts to parse an explicit user layout hint string into a [`LayoutFamily`],
@@ -92,9 +92,9 @@ impl LayoutFamily {
         let first_flow = flows.first().cloned().unwrap_or_else(FlowId::main);
 
         match clean.as_str() {
-            "single" | "prose" | "single_flow" | "running_text" => {
-                Some(Self::SingleFlow { flow_id: first_flow })
-            }
+            "single" | "prose" | "single_flow" | "running_text" => Some(Self::SingleFlow {
+                flow_id: first_flow,
+            }),
             "parallel" | "columns" | "multi_column" | "two_column" => {
                 let count = if flows.len() >= 2 { flows.len() } else { 2 };
                 Some(Self::ParallelColumns {
@@ -103,15 +103,16 @@ impl LayoutFamily {
                     flow_ids: flows.to_vec(),
                 })
             }
-            "mikraot_gedolot" | "mikraot" => {
-                Some(Self::ParallelColumns {
-                    column_count: flows.len().max(4),
-                    proportions: None,
-                    flow_ids: flows.to_vec(),
-                })
-            }
+            "mikraot_gedolot" | "mikraot" => Some(Self::ParallelColumns {
+                column_count: flows.len().max(4),
+                proportions: None,
+                flow_ids: flows.to_vec(),
+            }),
             "tzurat_hadaf" | "talmud" | "gemara" | "l_shape" => {
-                let primary = flows.first().cloned().unwrap_or_else(|| FlowId::new("gemara"));
+                let primary = flows
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| FlowId::new("gemara"));
                 let inner = flows.get(1).cloned();
                 let outer = flows.get(2).cloned();
                 Some(Self::TzuratHaDaf {
@@ -139,11 +140,9 @@ impl LayoutFamily {
                     column_flows,
                 })
             }
-            "custom" | "custom_constraints" => {
-                Some(Self::CustomConstraints {
-                    flow_ids: flows.to_vec(),
-                })
-            }
+            "custom" | "custom_constraints" => Some(Self::CustomConstraints {
+                flow_ids: flows.to_vec(),
+            }),
             _ => None,
         }
     }
@@ -176,7 +175,11 @@ mod tests {
 
     #[test]
     fn test_from_explicit_hint() {
-        let flows = vec![FlowId::new("torah"), FlowId::new("onkelos"), FlowId::new("rashi")];
+        let flows = vec![
+            FlowId::new("torah"),
+            FlowId::new("onkelos"),
+            FlowId::new("rashi"),
+        ];
         let fam = LayoutFamily::from_explicit_hint("talmud", &flows);
         assert!(fam.is_some());
         if let Some(LayoutFamily::TzuratHaDaf { primary_flow, .. }) = fam {

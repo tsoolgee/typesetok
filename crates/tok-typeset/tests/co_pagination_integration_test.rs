@@ -4,8 +4,8 @@
 use std::sync::Arc;
 use tok_typeset::{
     AnchorKey, CoPaginatedChunk, CoPaginatedCommentary, CoPaginationDocument, NonBlockingPaginator,
-    PaginationEvent, SpreadSide, SyncRemedy, SynchronizerConfig, TemplateConfig,
-    TypesettingEngine, TypesettingEngineConfig,
+    PaginationEvent, SpreadSide, SyncRemedy, SynchronizerConfig, TemplateConfig, TypesettingEngine,
+    TypesettingEngineConfig,
 };
 
 fn create_engine() -> TypesettingEngine {
@@ -60,7 +60,11 @@ fn test_multi_page_talmud_spread_facing_pages_alternation() {
     };
 
     let result = engine.typeset_co_paginated_document(&template, &sync_config, &doc);
-    assert!(result.pages.len() >= 2, "Expected at least 2 pages, got {}", result.pages.len());
+    assert!(
+        result.pages.len() >= 2,
+        "Expected at least 2 pages, got {}",
+        result.pages.len()
+    );
 
     // Verify Recto / Verso alternation
     for (idx, page) in result.pages.iter().enumerate() {
@@ -70,10 +74,24 @@ fn test_multi_page_talmud_spread_facing_pages_alternation() {
         } else {
             SpreadSide::Verso
         };
-        assert_eq!(page.math.side, expected_side, "Page {} recto/verso mismatch", page.page_number);
+        assert_eq!(
+            page.math.side, expected_side,
+            "Page {} recto/verso mismatch",
+            page.page_number
+        );
 
-        let rashi_col = page.math.columns.iter().find(|c| c.stream_id == "rashi").unwrap();
-        let tosafot_col = page.math.columns.iter().find(|c| c.stream_id == "tosafot").unwrap();
+        let rashi_col = page
+            .math
+            .columns
+            .iter()
+            .find(|c| c.stream_id == "rashi")
+            .unwrap();
+        let tosafot_col = page
+            .math
+            .columns
+            .iter()
+            .find(|c| c.stream_id == "tosafot")
+            .unwrap();
 
         // Recto: inner margin is on left (spine is left for Hebrew), Rashi is inner (left)
         // Verso: inner margin is on right (spine is right for Hebrew), Rashi is inner (right)
@@ -94,7 +112,11 @@ fn test_multi_page_talmud_spread_facing_pages_alternation() {
         }
 
         // Verify page layout frames
-        assert_eq!(page.page_layout.frames.len(), 3, "Each page must have 3 flow frames (gemara, rashi, tosafot)");
+        assert_eq!(
+            page.page_layout.frames.len(),
+            3,
+            "Each page must have 3 flow frames (gemara, rashi, tosafot)"
+        );
     }
 }
 
@@ -132,7 +154,10 @@ fn test_active_synchronization_spring_remedy() {
 
     // Find sync result for anchor "a1"
     let sync_a1 = page0.sync_results.iter().find(|s| s.anchor_key.0 == "a1");
-    assert!(sync_a1.is_some(), "Anchor a1 must have a synchronization record");
+    assert!(
+        sync_a1.is_some(),
+        "Anchor a1 must have a synchronization record"
+    );
 
     let s = sync_a1.unwrap();
     match s.remedy {
@@ -159,7 +184,12 @@ fn test_commentary_overflow_splits_gemara_and_carries_over() {
 
     // Gemara has 2 chunks. Chunk 1 has massive commentary that exceeds page height (content_height = ~770pt)
     let massive_rashi = (0..60)
-        .map(|idx| format!("רש\"י שורה {} פירוש ארוך מאוד הגודש וממלא את העמוד לחלוטין", idx))
+        .map(|idx| {
+            format!(
+                "רש\"י שורה {} פירוש ארוך מאוד הגודש וממלא את העמוד לחלוטין",
+                idx
+            )
+        })
         .collect::<Vec<_>>()
         .join(" ");
 
@@ -190,7 +220,10 @@ fn test_commentary_overflow_splits_gemara_and_carries_over() {
     let result = engine.typeset_co_paginated_document(&template, &sync_config, &doc);
 
     // Multi-page splitting must have carried over chunk 2 and subsequent commentary to page 2
-    assert!(result.pages.len() >= 2, "Overflowing commentary must force multi-page split");
+    assert!(
+        result.pages.len() >= 2,
+        "Overflowing commentary must force multi-page split"
+    );
     assert!(result.total_gemara_lines > 0);
     assert!(result.total_rashi_lines > 30);
 }
@@ -203,12 +236,10 @@ fn test_async_paginator_incremental_streaming_and_cancellation() {
 
     // 1. Verify incremental streaming
     let doc = CoPaginationDocument {
-        main_chunks: vec![
-            CoPaginatedChunk {
-                text: "משנה ראשונה ברכות פרק ראשון".to_string(),
-                anchors: vec![(AnchorKey("m1".to_string()), "משנה".to_string())],
-            },
-        ],
+        main_chunks: vec![CoPaginatedChunk {
+            text: "משנה ראשונה ברכות פרק ראשון".to_string(),
+            anchors: vec![(AnchorKey("m1".to_string()), "משנה".to_string())],
+        }],
         rashi_items: vec![CoPaginatedCommentary {
             target_anchor: AnchorKey("m1".to_string()),
             text: "רש\"י על המשנה".to_string(),
@@ -243,12 +274,7 @@ fn test_async_paginator_incremental_streaming_and_cancellation() {
     assert!(got_finished, "Must signal finished");
 
     // 2. Verify cancellation
-    let (rx2, token2) = NonBlockingPaginator::paginate_async(
-        template,
-        sync_config,
-        doc,
-        engine,
-    );
+    let (rx2, token2) = NonBlockingPaginator::paginate_async(template, sync_config, doc, engine);
     // Cancel immediately
     token2.cancel();
 

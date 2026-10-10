@@ -132,7 +132,9 @@ fn convert_multi_flow_state_to_root(raw: RawMultiFlowState) -> DocumentRoot {
     }
 
     if section.flows.is_empty() {
-        section.flows.push(Flow::new(FlowId::main(), FlowType::Main));
+        section
+            .flows
+            .push(Flow::new(FlowId::main(), FlowType::Main));
     }
 
     root.sections.push(section);
@@ -153,7 +155,8 @@ fn parse_document_json(
 
     // 2. Migration pipeline (for older schemas)
     if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
-        if let Ok(migrated) = tok_storage::migration::MigrationPipeline::migrate_document_json(val) {
+        if let Ok(migrated) = tok_storage::migration::MigrationPipeline::migrate_document_json(val)
+        {
             if let Ok(root) = serde_json::from_value::<DocumentRoot>(migrated) {
                 let mut manifest = TokManifest::default();
                 manifest.title = root.metadata.title.clone();
@@ -215,7 +218,11 @@ fn load_document_input(
                     return parse_document_json(&content);
                 }
             }
-            Err(format!("Failed to open package or document ({}): {}", input, tok_err).into())
+            Err(format!(
+                "Failed to open package or document ({}): {}",
+                input, tok_err
+            )
+            .into())
         }
     }
 }

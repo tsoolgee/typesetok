@@ -134,9 +134,13 @@ impl DocumentClassifier {
                 && features.footnote_flow().is_none())
         {
             return ClassificationResult {
-                family: LayoutFamily::SingleFlow { flow_id: first_flow_id },
+                family: LayoutFamily::SingleFlow {
+                    flow_id: first_flow_id,
+                },
                 confidence: ClassificationConfidence::StrongStructural,
-                reasoning: "Single active text flow detected; continuous single-column layout selected".to_string(),
+                reasoning:
+                    "Single active text flow detected; continuous single-column layout selected"
+                        .to_string(),
                 warnings,
             };
         }
@@ -159,15 +163,23 @@ impl DocumentClassifier {
                         column_flows: non_footnote_flows,
                     },
                     confidence: ClassificationConfidence::StrongStructural,
-                    reasoning: "Primary text stream with dedicated bottom footnote band detected".to_string(),
+                    reasoning: "Primary text stream with dedicated bottom footnote band detected"
+                        .to_string(),
                     warnings,
                 };
             } else if features.has_spine_relative_commentaries() {
                 // Tzurat HaDaf with footnotes band
-                let primary = features.primary_flow().map(|f| f.id.clone()).unwrap_or_else(|| non_footnote_flows[0].clone());
+                let primary = features
+                    .primary_flow()
+                    .map(|f| f.id.clone())
+                    .unwrap_or_else(|| non_footnote_flows[0].clone());
                 let inner = features.spine_inner_flow().map(|f| f.id.clone());
                 let outer = features.spine_outer_flow().map(|f| f.id.clone());
-                let expansion = features.explicit_expansion_flow_id.clone().or_else(|| inner.clone()).or_else(|| outer.clone());
+                let expansion = features
+                    .explicit_expansion_flow_id
+                    .clone()
+                    .or_else(|| inner.clone())
+                    .or_else(|| outer.clone());
 
                 return ClassificationResult {
                     family: LayoutFamily::TzuratHaDaf {
@@ -178,7 +190,9 @@ impl DocumentClassifier {
                         has_bottom_band: true,
                     },
                     confidence: ClassificationConfidence::StrongStructural,
-                    reasoning: "Spine-relative commentary structure with bottom footnote band detected".to_string(),
+                    reasoning:
+                        "Spine-relative commentary structure with bottom footnote band detected"
+                            .to_string(),
                     warnings,
                 };
             }
@@ -227,7 +241,9 @@ impl DocumentClassifier {
                 } else {
                     ClassificationConfidence::Disambiguated
                 },
-                reasoning: "Classical Tzurat HaDaf structure with dynamic commentary expansion identified".to_string(),
+                reasoning:
+                    "Classical Tzurat HaDaf structure with dynamic commentary expansion identified"
+                        .to_string(),
                 warnings,
             };
         }
@@ -242,7 +258,10 @@ impl DocumentClassifier {
                     flow_ids: non_footnote_flows,
                 },
                 confidence: ClassificationConfidence::StrongStructural,
-                reasoning: format!("Parallel multi-column layout with {} streams detected", col_count),
+                reasoning: format!(
+                    "Parallel multi-column layout with {} streams detected",
+                    col_count
+                ),
                 warnings,
             };
         }
@@ -253,7 +272,8 @@ impl DocumentClassifier {
                 flow_ids: all_flow_ids,
             },
             confidence: ClassificationConfidence::Fallback,
-            reasoning: "General multi-stream layout with custom constraints applied as fallback".to_string(),
+            reasoning: "General multi-stream layout with custom constraints applied as fallback"
+                .to_string(),
             warnings,
         }
     }
@@ -279,7 +299,8 @@ mod tests {
     fn test_classify_single_flow_prose() {
         let mut sec = SectionNode::new("מבוא", "default");
         sec.flows.clear();
-        sec.flows.push(make_flow_with_text("main", FlowType::Main, "טקסט רציף"));
+        sec.flows
+            .push(make_flow_with_text("main", FlowType::Main, "טקסט רציף"));
 
         let feat = DocumentLayoutFeatures::from_section(&sec);
         let res = DocumentClassifier::classify(&feat);
@@ -295,15 +316,24 @@ mod tests {
     fn test_classify_parallel_two_columns_unfamiliar_names() {
         let mut sec = SectionNode::new("תרגום מקביל", "default");
         sec.flows.clear();
-        sec.flows.push(make_flow_with_text("source_alpha", FlowType::Main, "טקסט מקור"));
-        sec.flows.push(make_flow_with_text("target_beta", FlowType::Main, "תרגום"));
+        sec.flows.push(make_flow_with_text(
+            "source_alpha",
+            FlowType::Main,
+            "טקסט מקור",
+        ));
+        sec.flows
+            .push(make_flow_with_text("target_beta", FlowType::Main, "תרגום"));
 
         let feat = DocumentLayoutFeatures::from_section(&sec);
         let res = DocumentClassifier::classify(&feat);
 
         assert_eq!(res.confidence, ClassificationConfidence::StrongStructural);
         match res.family {
-            LayoutFamily::ParallelColumns { column_count, flow_ids, .. } => {
+            LayoutFamily::ParallelColumns {
+                column_count,
+                flow_ids,
+                ..
+            } => {
                 assert_eq!(column_count, 2);
                 assert_eq!(flow_ids.len(), 2);
                 assert_eq!(flow_ids[0].0, "source_alpha");
@@ -317,17 +347,25 @@ mod tests {
     fn test_classify_mikraot_gedolot_four_columns() {
         let mut sec = SectionNode::new("מקראות", "default");
         sec.flows.clear();
-        sec.flows.push(make_flow_with_text("torah", FlowType::Main, "חומש"));
-        sec.flows.push(make_flow_with_text("targum", FlowType::Main, "תרגום"));
-        sec.flows.push(make_flow_with_text("comm_a", FlowType::Main, "פירוש א"));
-        sec.flows.push(make_flow_with_text("comm_b", FlowType::Main, "פירוש ב"));
+        sec.flows
+            .push(make_flow_with_text("torah", FlowType::Main, "חומש"));
+        sec.flows
+            .push(make_flow_with_text("targum", FlowType::Main, "תרגום"));
+        sec.flows
+            .push(make_flow_with_text("comm_a", FlowType::Main, "פירוש א"));
+        sec.flows
+            .push(make_flow_with_text("comm_b", FlowType::Main, "פירוש ב"));
 
         let feat = DocumentLayoutFeatures::from_section(&sec);
         let res = DocumentClassifier::classify(&feat);
 
         assert_eq!(res.confidence, ClassificationConfidence::StrongStructural);
         match res.family {
-            LayoutFamily::ParallelColumns { column_count, flow_ids, .. } => {
+            LayoutFamily::ParallelColumns {
+                column_count,
+                flow_ids,
+                ..
+            } => {
                 assert_eq!(column_count, 4);
                 assert_eq!(flow_ids.len(), 4);
             }
@@ -344,11 +382,13 @@ mod tests {
         primary.placement_role = Some("primary".to_string());
         sec.flows.push(primary);
 
-        let mut inner = make_flow_with_text("spine_commentary", FlowType::CommentA, "פירוש שדרה פנימית");
+        let mut inner =
+            make_flow_with_text("spine_commentary", FlowType::CommentA, "פירוש שדרה פנימית");
         inner.placement_role = Some("inner_spine".to_string());
         sec.flows.push(inner);
 
-        let mut outer = make_flow_with_text("margin_gloss", FlowType::CommentB, "הערת שוליים חיצונית");
+        let mut outer =
+            make_flow_with_text("margin_gloss", FlowType::CommentB, "הערת שוליים חיצונית");
         outer.placement_role = Some("outer_margin".to_string());
         sec.flows.push(outer);
 
@@ -378,8 +418,13 @@ mod tests {
     fn test_classify_footnote_band() {
         let mut sec = SectionNode::new("ספר מחקר", "default");
         sec.flows.clear();
-        sec.flows.push(make_flow_with_text("body", FlowType::Main, "גוף המאמר"));
-        sec.flows.push(make_flow_with_text("critical_apparatus", FlowType::Footnote, "הערות"));
+        sec.flows
+            .push(make_flow_with_text("body", FlowType::Main, "גוף המאמר"));
+        sec.flows.push(make_flow_with_text(
+            "critical_apparatus",
+            FlowType::Footnote,
+            "הערות",
+        ));
 
         let feat = DocumentLayoutFeatures::from_section(&sec);
         let res = DocumentClassifier::classify(&feat);
@@ -424,7 +469,9 @@ mod tests {
 
         assert_eq!(res.confidence, ClassificationConfidence::StrongStructural);
         match res.family {
-            LayoutFamily::TzuratHaDaf { has_bottom_band, .. } => {
+            LayoutFamily::TzuratHaDaf {
+                has_bottom_band, ..
+            } => {
                 assert!(has_bottom_band);
             }
             _ => panic!("Expected TzuratHaDaf with footnotes, got {:?}", res.family),
@@ -436,8 +483,10 @@ mod tests {
         let mut sec = SectionNode::new("כפיית פרוזה", "default");
         sec.layout_kind = Some("prose".to_string());
         sec.flows.clear();
-        sec.flows.push(make_flow_with_text("flow1", FlowType::Main, "זרם 1"));
-        sec.flows.push(make_flow_with_text("flow2", FlowType::CommentA, "זרם 2"));
+        sec.flows
+            .push(make_flow_with_text("flow1", FlowType::Main, "זרם 1"));
+        sec.flows
+            .push(make_flow_with_text("flow2", FlowType::CommentA, "זרם 2"));
 
         let feat = DocumentLayoutFeatures::from_section(&sec);
         let res = DocumentClassifier::classify(&feat);
@@ -445,9 +494,15 @@ mod tests {
         assert_eq!(res.confidence, ClassificationConfidence::Explicit);
         match res.family {
             LayoutFamily::SingleFlow { flow_id } => assert_eq!(flow_id.0, "flow1"),
-            _ => panic!("Expected explicit SingleFlow override, got {:?}", res.family),
+            _ => panic!(
+                "Expected explicit SingleFlow override, got {:?}",
+                res.family
+            ),
         }
-        assert!(!res.warnings.is_empty(), "Expected warning about multi-flow mismatch");
+        assert!(
+            !res.warnings.is_empty(),
+            "Expected warning about multi-flow mismatch"
+        );
     }
 
     #[test]
@@ -455,8 +510,10 @@ mod tests {
         let mut sec = SectionNode::new("רמז לא מוכר", "default");
         sec.layout_kind = Some("unknown_magic_layout".to_string());
         sec.flows.clear();
-        sec.flows.push(make_flow_with_text("col_1", FlowType::Main, "טור 1"));
-        sec.flows.push(make_flow_with_text("col_2", FlowType::Main, "טור 2"));
+        sec.flows
+            .push(make_flow_with_text("col_1", FlowType::Main, "טור 1"));
+        sec.flows
+            .push(make_flow_with_text("col_2", FlowType::Main, "טור 2"));
 
         let feat = DocumentLayoutFeatures::from_section(&sec);
         let res = DocumentClassifier::classify(&feat);
@@ -466,7 +523,9 @@ mod tests {
             LayoutFamily::ParallelColumns { column_count, .. } => assert_eq!(column_count, 2),
             _ => panic!("Expected fallback to ParallelColumns, got {:?}", res.family),
         }
-        assert!(res.warnings.iter().any(|w| w.contains("Unrecognized explicit layout hint")));
+        assert!(res
+            .warnings
+            .iter()
+            .any(|w| w.contains("Unrecognized explicit layout hint")));
     }
 }
-

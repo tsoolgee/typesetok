@@ -30,15 +30,16 @@ impl FlowFeature {
         let char_count: usize = flow.paragraphs.iter().map(|p| p.text.chars().count()).sum();
         let is_empty = paragraph_count == 0;
 
-        let placement_role = flow.placement_role.as_ref().map(|r| {
-            match r.trim().to_lowercase().as_str() {
-                "primary" | "main" => FlowPlacementRole::Primary,
-                "inner_spine" | "innerspine" | "inner" => FlowPlacementRole::InnerSpine,
-                "outer_margin" | "outermargin" | "outer" => FlowPlacementRole::OuterMargin,
-                "bottom_band" | "bottomband" | "footnote" => FlowPlacementRole::BottomBand,
-                _ => FlowPlacementRole::Column(index),
-            }
-        });
+        let placement_role =
+            flow.placement_role
+                .as_ref()
+                .map(|r| match r.trim().to_lowercase().as_str() {
+                    "primary" | "main" => FlowPlacementRole::Primary,
+                    "inner_spine" | "innerspine" | "inner" => FlowPlacementRole::InnerSpine,
+                    "outer_margin" | "outermargin" | "outer" => FlowPlacementRole::OuterMargin,
+                    "bottom_band" | "bottomband" | "footnote" => FlowPlacementRole::BottomBand,
+                    _ => FlowPlacementRole::Column(index),
+                });
 
         let is_footnote = matches!(placement_role, Some(FlowPlacementRole::BottomBand))
             || flow.flow_type == FlowType::Footnote
@@ -130,7 +131,9 @@ impl DocumentLayoutFeatures {
 
     /// Primary flow candidate, if identified.
     pub fn primary_flow(&self) -> Option<&FlowFeature> {
-        self.flows.iter().find(|f| f.is_primary_candidate)
+        self.flows
+            .iter()
+            .find(|f| f.is_primary_candidate)
             .or_else(|| self.flows.iter().find(|f| !f.is_footnote))
     }
 
@@ -211,7 +214,10 @@ mod tests {
 
         let doc_features = DocumentLayoutFeatures::from_section(&sec);
         assert_eq!(doc_features.section_name, "שער ראשון");
-        assert_eq!(doc_features.explicit_layout_hint.as_deref(), Some("tzurat_hadaf"));
+        assert_eq!(
+            doc_features.explicit_layout_hint.as_deref(),
+            Some("tzurat_hadaf")
+        );
         assert_eq!(doc_features.total_flow_count(), 3);
         assert_eq!(doc_features.active_flow_count(), 1);
         assert_eq!(doc_features.column_flow_count(), 2);

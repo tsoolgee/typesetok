@@ -119,7 +119,8 @@ impl SpreadMathematics {
         };
 
         let content_width = (config.page_width_pt - margin_left - margin_right).max(0.0);
-        let content_height = (config.page_height_pt - config.margin_top_pt - config.margin_bottom_pt).max(0.0);
+        let content_height =
+            (config.page_height_pt - config.margin_top_pt - config.margin_bottom_pt).max(0.0);
 
         let gutter = config.gutter_pt.min(content_width * 0.05).max(0.0);
         let available_cols_width = (content_width - 2.0 * gutter).max(0.0);
@@ -132,7 +133,11 @@ impl SpreadMathematics {
                 main_ratio,
                 inner_commentary_ratio,
                 outer_commentary_ratio,
-            } => (*main_ratio, *inner_commentary_ratio, *outer_commentary_ratio),
+            } => (
+                *main_ratio,
+                *inner_commentary_ratio,
+                *outer_commentary_ratio,
+            ),
         };
 
         let main_width = available_cols_width * main_ratio;
@@ -231,8 +236,13 @@ impl SpreadMathematics {
 
             if space_below >= min_gap {
                 let narrow_lines = (gemara_h / config.commentary_line_height).ceil() as usize;
-                let expanded_width = self.inner_column_width_pt + self.main_column_width_pt + self.gutter_pt;
-                return MeasureProfile::l_shape(narrow_lines, self.inner_column_width_pt, expanded_width);
+                let expanded_width =
+                    self.inner_column_width_pt + self.main_column_width_pt + self.gutter_pt;
+                return MeasureProfile::l_shape(
+                    narrow_lines,
+                    self.inner_column_width_pt,
+                    expanded_width,
+                );
             }
         }
 
@@ -303,7 +313,8 @@ mod tests {
         assert!(!profile.is_uniform());
         assert_eq!(profile.width_for_line(0), math.inner_column_width_pt);
         // At line 14 (ceil(180 / 13.5)), should expand to full width (inner + main + gutter)
-        let expected_expanded = math.inner_column_width_pt + math.main_column_width_pt + math.gutter_pt;
+        let expected_expanded =
+            math.inner_column_width_pt + math.main_column_width_pt + math.gutter_pt;
         assert_eq!(profile.width_for_line(14), expected_expanded);
         assert_eq!(profile.width_for_line(20), expected_expanded);
     }

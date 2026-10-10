@@ -85,7 +85,10 @@ impl MeasureProfile {
 
     /// Creates a profile from an explicit list of widths.
     pub fn from_widths(widths: Vec<f32>, repeat_last: bool) -> Self {
-        Self { widths, repeat_last }
+        Self {
+            widths,
+            repeat_last,
+        }
     }
 
     /// Creates a profile from a slice of widths.
@@ -512,7 +515,10 @@ impl<'a> BreakContext<'a> {
                 };
 
                 if is_uniform {
-                    if best_single.as_ref().is_none_or(|b| total < b.total_demerits) {
+                    if best_single
+                        .as_ref()
+                        .is_none_or(|b| total < b.total_demerits)
+                    {
                         best_single = Some(candidate_node);
                     }
                 } else {
@@ -889,7 +895,11 @@ mod tests {
         let profile = MeasureProfile::l_shape(3, 120.0, 240.0);
         let lines = KnuthPlassBreaker::break_paragraph_with_profile(&items, &profile, 2.0);
 
-        assert!(lines.len() >= 4, "Expected at least 4 lines, got {}", lines.len());
+        assert!(
+            lines.len() >= 4,
+            "Expected at least 4 lines, got {}",
+            lines.len()
+        );
         assert_eq!(lines[0].target_width, 120.0);
         assert_eq!(lines[1].target_width, 120.0);
         assert_eq!(lines[2].target_width, 120.0);
@@ -941,9 +951,17 @@ mod tests {
         }
 
         // Narrow line 1 (80pt) should pack fewer words (word=35, space=10 -> at most 2 words = 80pt)
-        assert!(word_counts[1] <= 2, "Narrow line 1 should pack <= 2 words, got {}", word_counts[1]);
+        assert!(
+            word_counts[1] <= 2,
+            "Narrow line 1 should pack <= 2 words, got {}",
+            word_counts[1]
+        );
         // Wide line 2 (240pt) should pack significantly more words
-        assert!(word_counts[2] >= 4, "Wide line 2 should pack >= 4 words, got {}", word_counts[2]);
+        assert!(
+            word_counts[2] >= 4,
+            "Wide line 2 should pack >= 4 words, got {}",
+            word_counts[2]
+        );
     }
 
     #[test]
@@ -990,7 +1008,9 @@ mod tests {
         // Empty widths
         let empty_profile = MeasureProfile::from_widths(vec![], true);
         assert!(!empty_profile.is_valid());
-        assert!(KnuthPlassBreaker::break_paragraph_with_profile(&items, &empty_profile, 2.0).is_empty());
+        assert!(
+            KnuthPlassBreaker::break_paragraph_with_profile(&items, &empty_profile, 2.0).is_empty()
+        );
 
         // Non-positive or NaN widths
         let zero_profile = MeasureProfile::from_widths(vec![0.0], true);
@@ -1003,11 +1023,17 @@ mod tests {
         // Single word wider than first narrow line triggers emergency pass without loss
         let items_overlong = paragraph(&[150.0, 40.0]);
         let narrow_first = MeasureProfile::l_shape(1, 100.0, 200.0);
-        let lines = KnuthPlassBreaker::break_paragraph_with_profile(&items_overlong, &narrow_first, 2.0);
+        let lines =
+            KnuthPlassBreaker::break_paragraph_with_profile(&items_overlong, &narrow_first, 2.0);
         assert!(!lines.is_empty());
         let total_boxes: usize = lines
             .iter()
-            .map(|l| l.items.iter().filter(|i| matches!(i, LayoutItem::Box { .. })).count())
+            .map(|l| {
+                l.items
+                    .iter()
+                    .filter(|i| matches!(i, LayoutItem::Box { .. }))
+                    .count()
+            })
             .sum();
         assert_eq!(total_boxes, 2);
     }
@@ -1015,7 +1041,16 @@ mod tests {
     #[test]
     fn test_hebrew_words_measure_profile() {
         let words = [
-            "מאימתי", "קורין", "את", "שמע", "בערבין", "משעה", "שהכהנים", "נכנסים", "לאכול", "בתרומתן",
+            "מאימתי",
+            "קורין",
+            "את",
+            "שמע",
+            "בערבין",
+            "משעה",
+            "שהכהנים",
+            "נכנסים",
+            "לאכול",
+            "בתרומתן",
         ];
         let mut items = Vec::new();
         for (i, w) in words.iter().enumerate() {
@@ -1039,7 +1074,12 @@ mod tests {
 
         let total_words: usize = lines
             .iter()
-            .map(|l| l.items.iter().filter(|it| matches!(it, LayoutItem::Box { .. })).count())
+            .map(|l| {
+                l.items
+                    .iter()
+                    .filter(|it| matches!(it, LayoutItem::Box { .. }))
+                    .count()
+            })
             .sum();
         assert_eq!(total_words, words.len());
     }

@@ -8,7 +8,9 @@
 //! - Dynamically synthesizes L-shapes under early-terminating central text.
 //! - Applies active vertical springs to align commentary headings with anchors.
 
-use super::sync::{ActiveSyncResult, ActiveSynchronizer, AnchorKey, SynchronizerConfig, SyncRemedy};
+use super::sync::{
+    ActiveSyncResult, ActiveSynchronizer, AnchorKey, SyncRemedy, SynchronizerConfig,
+};
 use super::template::{SpreadMathematics, TemplateConfig};
 use crate::engine::TypesettingEngine;
 use crate::geometry::{LineBox, PageLayoutBox, PhysicalRect, TextFrameBox};
@@ -77,9 +79,12 @@ impl CoPaginationEngine {
         doc: &CoPaginationDocument,
         engine: &TypesettingEngine,
     ) -> CoPaginationResult {
-        let mut remaining_chunks: VecDeque<CoPaginatedChunk> = doc.main_chunks.iter().cloned().collect();
-        let mut remaining_rashi: VecDeque<CoPaginatedCommentary> = doc.rashi_items.iter().cloned().collect();
-        let mut remaining_tosafot: VecDeque<CoPaginatedCommentary> = doc.tosafot_items.iter().cloned().collect();
+        let mut remaining_chunks: VecDeque<CoPaginatedChunk> =
+            doc.main_chunks.iter().cloned().collect();
+        let mut remaining_rashi: VecDeque<CoPaginatedCommentary> =
+            doc.rashi_items.iter().cloned().collect();
+        let mut remaining_tosafot: VecDeque<CoPaginatedCommentary> =
+            doc.tosafot_items.iter().cloned().collect();
 
         let mut pages = Vec::new();
         let mut total_gemara_lines = 0;
@@ -89,13 +94,17 @@ impl CoPaginationEngine {
 
         let mut page_number = 1;
 
-        while (!remaining_chunks.is_empty() || !remaining_rashi.is_empty() || !remaining_tosafot.is_empty())
+        while (!remaining_chunks.is_empty()
+            || !remaining_rashi.is_empty()
+            || !remaining_tosafot.is_empty())
             && page_number <= Self::MAX_PAGES_SAFETY
         {
             let math = SpreadMathematics::for_page(config, page_number);
 
-            let max_gemara_lines = (math.content_height_pt / config.main_line_height).floor() as usize;
-            let max_commentary_lines = (math.content_height_pt / config.commentary_line_height).floor() as usize;
+            let max_gemara_lines =
+                (math.content_height_pt / config.main_line_height).floor() as usize;
+            let max_commentary_lines =
+                (math.content_height_pt / config.commentary_line_height).floor() as usize;
 
             // 1. Greedily determine which Gemara chunks fit on this page without overflowing commentary
             let mut page_chunks = Vec::new();
@@ -139,7 +148,10 @@ impl CoPaginationEngine {
                     for r in remaining_rashi.iter().filter(|r| r.target_anchor == *a_key) {
                         chunk_rashi_demand += r.text.len();
                     }
-                    for t in remaining_tosafot.iter().filter(|t| t.target_anchor == *a_key) {
+                    for t in remaining_tosafot
+                        .iter()
+                        .filter(|t| t.target_anchor == *a_key)
+                    {
                         chunk_tosafot_demand += t.text.len();
                     }
                 }
@@ -163,7 +175,8 @@ impl CoPaginationEngine {
                         }
                     }
                     let abs_l = tentative_gemara_lines.len() + anchor_line_rel;
-                    let abs_y = current_g_y + (anchor_line_rel as f32 + 1.0) * config.main_line_height;
+                    let abs_y =
+                        current_g_y + (anchor_line_rel as f32 + 1.0) * config.main_line_height;
                     tentative_gemara_anchors.insert(a_key.clone(), (abs_l, abs_y));
                 }
 
@@ -218,10 +231,16 @@ impl CoPaginationEngine {
                 let p_profile = if !rashi_profile.is_uniform() {
                     if start_line < rashi_narrow_lines {
                         let remaining_narrow = rashi_narrow_lines - start_line;
-                        let exp_w = math.inner_column_width_pt + math.main_column_width_pt + math.gutter_pt;
-                        crate::knuth_plass::MeasureProfile::l_shape(remaining_narrow, math.inner_column_width_pt, exp_w)
+                        let exp_w =
+                            math.inner_column_width_pt + math.main_column_width_pt + math.gutter_pt;
+                        crate::knuth_plass::MeasureProfile::l_shape(
+                            remaining_narrow,
+                            math.inner_column_width_pt,
+                            exp_w,
+                        )
                     } else {
-                        let exp_w = math.inner_column_width_pt + math.main_column_width_pt + math.gutter_pt;
+                        let exp_w =
+                            math.inner_column_width_pt + math.main_column_width_pt + math.gutter_pt;
                         crate::knuth_plass::MeasureProfile::uniform(exp_w)
                     }
                 } else {
@@ -241,7 +260,9 @@ impl CoPaginationEngine {
                     config.commentary_line_height,
                 );
 
-                if rashi_line_counter + p_lines.len() > max_commentary_lines + 2 && !page_rashi_lines.is_empty() {
+                if rashi_line_counter + p_lines.len() > max_commentary_lines + 2
+                    && !page_rashi_lines.is_empty()
+                {
                     // Commentary overflows: push this item back to remaining for next page
                     remaining_rashi.push_front(item);
                     break;
@@ -261,7 +282,10 @@ impl CoPaginationEngine {
                         spring_pt = s;
                         ActiveSynchronizer::apply_spring_offset(&mut p_lines, spring_pt);
                     }
-                    if matches!(sync.remedy, SyncRemedy::ExcessiveLead { .. } | SyncRemedy::RequirePageCut { .. }) {
+                    if matches!(
+                        sync.remedy,
+                        SyncRemedy::ExcessiveLead { .. } | SyncRemedy::RequirePageCut { .. }
+                    ) {
                         all_anchors_remedied = false;
                     }
                     sync_results.push(sync);
@@ -306,7 +330,9 @@ impl CoPaginationEngine {
                     config.commentary_line_height,
                 );
 
-                if tosafot_line_counter + p_lines.len() > max_commentary_lines + 2 && !page_tosafot_lines.is_empty() {
+                if tosafot_line_counter + p_lines.len() > max_commentary_lines + 2
+                    && !page_tosafot_lines.is_empty()
+                {
                     remaining_tosafot.push_front(item);
                     break;
                 }
@@ -333,7 +359,9 @@ impl CoPaginationEngine {
             let rashi_expanded_count = page_rashi_lines
                 .iter()
                 .enumerate()
-                .filter(|(idx, line)| *idx >= rashi_narrow_lines || line.width > math.inner_column_width_pt + 1.0)
+                .filter(|(idx, line)| {
+                    *idx >= rashi_narrow_lines || line.width > math.inner_column_width_pt + 1.0
+                })
                 .count();
 
             // 5. Build physical page frames matching SpreadMathematics
@@ -356,8 +384,15 @@ impl CoPaginationEngine {
 
             let page_layout = PageLayoutBox {
                 page_index: page_number - 1,
-                page_number_gematria: crate::gematria::GematriaEngine::to_hebrew_numeral(page_number),
-                dimensions: PhysicalRect::new(0.0, 0.0, config.page_width_pt, config.page_height_pt),
+                page_number_gematria: crate::gematria::GematriaEngine::to_hebrew_numeral(
+                    page_number,
+                ),
+                dimensions: PhysicalRect::new(
+                    0.0,
+                    0.0,
+                    config.page_width_pt,
+                    config.page_height_pt,
+                ),
                 frames,
                 break_token: None,
             };
@@ -457,7 +492,10 @@ mod tests {
 
         let result = CoPaginationEngine::co_paginate(&config, &sync_config, &doc, &engine);
 
-        assert!(result.total_pages >= 1, "Expected at least 1 page generated");
+        assert!(
+            result.total_pages >= 1,
+            "Expected at least 1 page generated"
+        );
         assert!(result.total_gemara_lines > 0);
         assert!(result.total_rashi_lines > 0);
         assert!(result.total_tosafot_lines > 0);
@@ -508,7 +546,13 @@ mod tests {
         assert_eq!(result.pages[1].page_number, 2);
 
         // Facing spreads alternate Recto -> Verso
-        assert_eq!(result.pages[0].math.side, crate::multi_flow::SpreadSide::Recto);
-        assert_eq!(result.pages[1].math.side, crate::multi_flow::SpreadSide::Verso);
+        assert_eq!(
+            result.pages[0].math.side,
+            crate::multi_flow::SpreadSide::Recto
+        );
+        assert_eq!(
+            result.pages[1].math.side,
+            crate::multi_flow::SpreadSide::Verso
+        );
     }
 }

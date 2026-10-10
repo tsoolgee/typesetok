@@ -407,9 +407,8 @@ impl MultiFlowSolver {
             .iter()
             .find(|f| f.role == FlowPlacementRole::BottomBand || f.flow_id.0 == "footnote");
 
-        let footnote_target = footnote_target_height_pt.or_else(|| {
-            footnote_flow.map(|f| f.target_height_pt)
-        });
+        let footnote_target =
+            footnote_target_height_pt.or_else(|| footnote_flow.map(|f| f.target_height_pt));
 
         let footnote_allocation = match footnote_target.map(non_negative) {
             Some(fn_height) if fn_height > 0.0 => {
@@ -460,17 +459,20 @@ impl MultiFlowSolver {
         let commentary_spec = if let Some(exp_id) = expansion_flow_id {
             column_flows.iter().find(|f| &f.flow_id == exp_id)
         } else {
-            column_flows.iter().find(|f| {
-                f.role == FlowPlacementRole::InnerSpine
-                    || f.priority == 2
-                    || FlowRole::of(f) == FlowRole::Rashi
-            }).or_else(|| {
-                column_flows
-                    .iter()
-                    .enumerate()
-                    .find(|(idx, _)| Some(*idx) != primary_index)
-                    .map(|(_, f)| f)
-            })
+            column_flows
+                .iter()
+                .find(|f| {
+                    f.role == FlowPlacementRole::InnerSpine
+                        || f.priority == 2
+                        || FlowRole::of(f) == FlowRole::Rashi
+                })
+                .or_else(|| {
+                    column_flows
+                        .iter()
+                        .enumerate()
+                        .find(|(idx, _)| Some(*idx) != primary_index)
+                        .map(|(_, f)| f)
+                })
         };
 
         let has_commentary = commentary_spec.is_some() && column_flows.len() > 1;
@@ -478,7 +480,8 @@ impl MultiFlowSolver {
         let primary_h = match primary_target_height_pt {
             Some(target_h) => {
                 let actual_primary_h = non_negative(target_h).min(available_height);
-                if actual_primary_h < available_height - Self::L_SHAPE_MIN_GAP_PT && has_commentary {
+                if actual_primary_h < available_height - Self::L_SHAPE_MIN_GAP_PT && has_commentary
+                {
                     if let (Some(primary_idx), Some(comm_spec)) = (primary_index, commentary_spec) {
                         let primary_alloc = &mut allocations[primary_idx];
                         primary_alloc.allocated_height_pt = actual_primary_h;
@@ -488,7 +491,8 @@ impl MultiFlowSolver {
                         );
 
                         let expansion_y = margin_y_pt + actual_primary_h + gutter;
-                        let expansion_h = non_negative(available_height - actual_primary_h - gutter);
+                        let expansion_h =
+                            non_negative(available_height - actual_primary_h - gutter);
 
                         let exp_id = if comm_spec.flow_id.0 == "rashi" {
                             FlowId::new("rashi_expansion")
@@ -748,13 +752,21 @@ mod tests {
     #[test]
     fn test_generic_spread_two_flows() {
         let flows = vec![
-            FlowGeometrySpec::new(FlowId("primary".into()), 1).with_role(FlowPlacementRole::Primary),
-            FlowGeometrySpec::new(FlowId("commentary".into()), 2).with_role(FlowPlacementRole::InnerSpine),
+            FlowGeometrySpec::new(FlowId("primary".into()), 1)
+                .with_role(FlowPlacementRole::Primary),
+            FlowGeometrySpec::new(FlowId("commentary".into()), 2)
+                .with_role(FlowPlacementRole::InnerSpine),
         ];
 
         // Recto: InnerSpine should be on the LEFT (spine is left)
         let recto = MultiFlowSolver::solve_generic_spread(
-            595.0, 842.0, 40.0, 20.0, 36.0, &flows, SpreadSide::Recto,
+            595.0,
+            842.0,
+            40.0,
+            20.0,
+            36.0,
+            &flows,
+            SpreadSide::Recto,
         );
         assert_eq!(recto.len(), 2);
         let comm_recto = recto.iter().find(|a| a.flow_id.0 == "commentary").unwrap();
@@ -764,7 +776,13 @@ mod tests {
 
         // Verso: InnerSpine should be on the RIGHT (spine is right)
         let verso = MultiFlowSolver::solve_generic_spread(
-            595.0, 842.0, 40.0, 20.0, 36.0, &flows, SpreadSide::Verso,
+            595.0,
+            842.0,
+            40.0,
+            20.0,
+            36.0,
+            &flows,
+            SpreadSide::Verso,
         );
         let comm_verso = verso.iter().find(|a| a.flow_id.0 == "commentary").unwrap();
         let prim_verso = verso.iter().find(|a| a.flow_id.0 == "primary").unwrap();
@@ -780,11 +798,20 @@ mod tests {
             spec("ramban", 4),
         ];
         let recto = MultiFlowSolver::solve_generic_spread(
-            595.0, 842.0, 36.0, 36.0, 36.0, &flows, SpreadSide::Recto,
+            595.0,
+            842.0,
+            36.0,
+            36.0,
+            36.0,
+            &flows,
+            SpreadSide::Recto,
         );
         assert_eq!(recto.len(), 4);
         for i in 0..3 {
-            assert!(recto[i].allocated_x_pt + recto[i].allocated_width_pt <= recto[i + 1].allocated_x_pt + 1e-3);
+            assert!(
+                recto[i].allocated_x_pt + recto[i].allocated_width_pt
+                    <= recto[i + 1].allocated_x_pt + 1e-3
+            );
         }
     }
 
@@ -796,7 +823,13 @@ mod tests {
             FlowGeometrySpec::new(FlowId("f3".into()), 3).with_width_ratio(0.25),
         ];
         let allocs = MultiFlowSolver::solve_generic_spread(
-            600.0, 800.0, 30.0, 30.0, 30.0, &flows, SpreadSide::Recto,
+            600.0,
+            800.0,
+            30.0,
+            30.0,
+            30.0,
+            &flows,
+            SpreadSide::Recto,
         );
         assert_eq!(allocs.len(), 3);
         // f1 should have twice the width of f2 and f3
@@ -810,20 +843,31 @@ mod tests {
             .map(|i| spec(&format!("col_{i}"), i))
             .collect::<Vec<_>>();
         let allocs = MultiFlowSolver::solve_generic_spread(
-            600.0, 800.0, 30.0, 30.0, 30.0, &flows, SpreadSide::Recto,
+            600.0,
+            800.0,
+            30.0,
+            30.0,
+            30.0,
+            &flows,
+            SpreadSide::Recto,
         );
         assert_eq!(allocs.len(), 5);
         for i in 0..4 {
             assert!((allocs[i].allocated_width_pt - allocs[i + 1].allocated_width_pt).abs() < 1e-3);
-            assert!(allocs[i].allocated_x_pt + allocs[i].allocated_width_pt <= allocs[i + 1].allocated_x_pt + 1e-3);
+            assert!(
+                allocs[i].allocated_x_pt + allocs[i].allocated_width_pt
+                    <= allocs[i + 1].allocated_x_pt + 1e-3
+            );
         }
     }
 
     #[test]
     fn test_generalized_l_shape_expansion_custom_flows() {
         let flows = vec![
-            FlowGeometrySpec::new(FlowId("main_text".into()), 1).with_role(FlowPlacementRole::Primary),
-            FlowGeometrySpec::new(FlowId("commentary".into()), 2).with_role(FlowPlacementRole::InnerSpine),
+            FlowGeometrySpec::new(FlowId("main_text".into()), 1)
+                .with_role(FlowPlacementRole::Primary),
+            FlowGeometrySpec::new(FlowId("commentary".into()), 2)
+                .with_role(FlowPlacementRole::InnerSpine),
         ];
 
         let result = MultiFlowSolver::solve_dynamic_spread_with_footnotes(
@@ -840,12 +884,22 @@ mod tests {
         );
 
         assert!(result.has_l_shape_expansion);
-        let main_alloc = result.allocations.iter().find(|a| a.flow_id.0 == "main_text").unwrap();
-        let exp_alloc = result.allocations.iter().find(|a| a.flow_id.0 == "commentary_expansion").unwrap();
+        let main_alloc = result
+            .allocations
+            .iter()
+            .find(|a| a.flow_id.0 == "main_text")
+            .unwrap();
+        let exp_alloc = result
+            .allocations
+            .iter()
+            .find(|a| a.flow_id.0 == "commentary_expansion")
+            .unwrap();
         assert_eq!(main_alloc.allocated_height_pt, 250.0);
         assert_eq!(exp_alloc.allocated_x_pt, main_alloc.allocated_x_pt);
         assert_eq!(exp_alloc.allocated_width_pt, main_alloc.allocated_width_pt);
-        assert!(exp_alloc.allocated_y_pt > main_alloc.allocated_y_pt + main_alloc.allocated_height_pt);
+        assert!(
+            exp_alloc.allocated_y_pt > main_alloc.allocated_y_pt + main_alloc.allocated_height_pt
+        );
 
         for (i, a) in result.allocations.iter().enumerate() {
             for b in &result.allocations[i + 1..] {
@@ -857,9 +911,12 @@ mod tests {
     #[test]
     fn test_generalized_l_shape_with_custom_expansion_id() {
         let flows = vec![
-            FlowGeometrySpec::new(FlowId("chumash".into()), 1).with_role(FlowPlacementRole::Primary),
-            FlowGeometrySpec::new(FlowId("targum".into()), 2).with_role(FlowPlacementRole::InnerSpine),
-            FlowGeometrySpec::new(FlowId("rashi".into()), 3).with_role(FlowPlacementRole::OuterMargin),
+            FlowGeometrySpec::new(FlowId("chumash".into()), 1)
+                .with_role(FlowPlacementRole::Primary),
+            FlowGeometrySpec::new(FlowId("targum".into()), 2)
+                .with_role(FlowPlacementRole::InnerSpine),
+            FlowGeometrySpec::new(FlowId("rashi".into()), 3)
+                .with_role(FlowPlacementRole::OuterMargin),
         ];
 
         let exp_id = FlowId("rashi".into());
@@ -877,7 +934,10 @@ mod tests {
         );
 
         assert!(result.has_l_shape_expansion);
-        assert!(result.allocations.iter().any(|a| a.flow_id.0 == "rashi_expansion"));
+        assert!(result
+            .allocations
+            .iter()
+            .any(|a| a.flow_id.0 == "rashi_expansion"));
         for (i, a) in result.allocations.iter().enumerate() {
             for b in &result.allocations[i + 1..] {
                 assert!(!overlaps(a, b), "{:?} overlaps {:?}", a.flow_id, b.flow_id);
@@ -888,9 +948,12 @@ mod tests {
     #[test]
     fn test_generalized_l_shape_with_bottom_band_flow() {
         let flows = vec![
-            FlowGeometrySpec::new(FlowId("primary".into()), 1).with_role(FlowPlacementRole::Primary),
-            FlowGeometrySpec::new(FlowId("perush".into()), 2).with_role(FlowPlacementRole::InnerSpine),
-            FlowGeometrySpec::new(FlowId("heorot".into()), 3).with_role(FlowPlacementRole::BottomBand),
+            FlowGeometrySpec::new(FlowId("primary".into()), 1)
+                .with_role(FlowPlacementRole::Primary),
+            FlowGeometrySpec::new(FlowId("perush".into()), 2)
+                .with_role(FlowPlacementRole::InnerSpine),
+            FlowGeometrySpec::new(FlowId("heorot".into()), 3)
+                .with_role(FlowPlacementRole::BottomBand),
         ];
 
         let result = MultiFlowSolver::solve_dynamic_spread_with_footnotes(

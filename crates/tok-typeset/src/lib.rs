@@ -16,11 +16,6 @@ pub mod shaper;
 pub mod template_synthesizer;
 
 pub use bidi::{BidiEngine, BidiRun};
-pub use layout_classifier::{ClassificationConfidence, ClassificationResult, DocumentClassifier};
-pub use layout_family::LayoutFamily;
-pub use layout_features::{DocumentLayoutFeatures, FlowFeature};
-pub use layout_template::{LayoutTemplate, TemplateConstraintError};
-pub use template_synthesizer::TemplateSynthesizer;
 pub use co_pagination::{
     ActiveSyncResult, ActiveSynchronizer, AnchorKey, AnchorPoint, CancellationToken,
     CoPaginatedChunk, CoPaginatedCommentary, CoPaginatedPage, CoPaginationDocument,
@@ -37,9 +32,13 @@ pub use geometry::{
 pub use hebrew_justify::{HebrewJustifier, JustificationTier, JustifiedLine, AHALTERM_LETTERS};
 pub use hit_test::{HitTestResult, HitTester};
 pub use knuth_plass::{BrokenLine, KnuthPlassBreaker, LayoutItem, LineSpan, MeasureProfile};
+pub use layout_classifier::{ClassificationConfidence, ClassificationResult, DocumentClassifier};
+pub use layout_family::LayoutFamily;
+pub use layout_features::{DocumentLayoutFeatures, FlowFeature};
+pub use layout_template::{LayoutTemplate, TemplateConstraintError};
 pub use multi_flow::{
     DynamicPageResult, DynamicTalmudPageResult, FlowGeometrySpec, FlowPlacementRole,
     MultiFlowSolver, SolvedFlowAllocation, SpreadSide,
 };
 pub use shaper::{PositionedGlyph, ShapedRun, TextShaper};
-
+pub use template_synthesizer::TemplateSynthesizer;
