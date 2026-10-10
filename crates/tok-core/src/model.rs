@@ -153,6 +153,28 @@ impl SectionNode {
             .iter()
             .find(|f| f.id == FlowId::main() || f.id.0 == "gemara" || f.flow_type == FlowType::Main)
     }
+
+    pub fn with_flows(mut self, flows: Vec<Flow>) -> Self {
+        self.flows = flows;
+        self
+    }
+
+    pub fn with_flow(mut self, flow: Flow) -> Self {
+        self.flows.push(flow);
+        self
+    }
+
+    pub fn find_flow(&self, id: &str) -> Option<&Flow> {
+        self.flows.iter().find(|f| f.id.0 == id)
+    }
+
+    pub fn find_flow_mut(&mut self, id: &str) -> Option<&mut Flow> {
+        self.flows.iter_mut().find(|f| f.id.0 == id)
+    }
+
+    pub fn has_flow(&self, id: &str) -> bool {
+        self.flows.iter().any(|f| f.id.0 == id)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -478,5 +500,27 @@ mod tests {
         assert!(sec.expansion_flow_id.is_none());
         assert!(sec.flows[0].width_ratio.is_none());
         assert!(sec.flows[0].placement_role.is_none());
+    }
+
+    #[test]
+    fn test_section_node_builder_and_query_methods() {
+        let sec = SectionNode::new("פרק ראשון", "default")
+            .with_layout_kind("parallel_columns")
+            .with_column_proportions(vec![0.6, 0.4])
+            .with_expansion_flow_id(FlowId::new("commentary"))
+            .with_flows(vec![
+                Flow::new(FlowId::new("stream_a"), FlowType::Main),
+                Flow::new(FlowId::new("stream_b"), FlowType::CommentA),
+            ])
+            .with_flow(Flow::new(FlowId::new("stream_c"), FlowType::Footnote));
+
+        assert_eq!(sec.flows.len(), 3);
+        assert!(sec.has_flow("stream_a"));
+        assert!(sec.has_flow("stream_b"));
+        assert!(sec.has_flow("stream_c"));
+        assert!(!sec.has_flow("stream_d"));
+        assert_eq!(sec.find_flow("stream_b").unwrap().flow_type, FlowType::CommentA);
+        assert_eq!(sec.layout_kind.as_deref(), Some("parallel_columns"));
+        assert_eq!(sec.column_proportions, Some(vec![0.6, 0.4]));
     }
 }
