@@ -101,6 +101,7 @@ export class TypesetOkApp {
   private activeFlowId: string | null = null;
   private wordCountTimer: ReturnType<typeof setTimeout> | null = null;
   private repaginateTimer: ReturnType<typeof setTimeout> | null = null;
+  private latestTypesetRequestId = 0;
   private documentState: MultiFlowDocumentState = {
     title: 'פרויקט דף גמרא.tok',
     templateType: 'gemara',
@@ -988,15 +989,16 @@ export class TypesetOkApp {
     }
   }
 
-  private scheduleRepaginate(): void {
+  private scheduleRepaginate(delayMs = 120): void {
     if (this.repaginateTimer) clearTimeout(this.repaginateTimer);
     this.repaginateTimer = setTimeout(() => {
       this.repaginateTimer = null;
       this.repaginateAndSync(false);
-    }, 120);
+    }, delayMs);
   }
 
   private async repaginateAndSync(forceReset = false): Promise<void> {
+    const requestId = ++this.latestTypesetRequestId;
     const win = window as any;
     let newPages: PageDescriptor[] = [];
 
@@ -1004,12 +1006,23 @@ export class TypesetOkApp {
       try {
         const docRoot = documentStateToDocumentRoot(this.documentState);
         const res = await win.tokIpc.typesetDocument({ document: docRoot });
+        // Discard stale response if a newer typeset request was dispatched while this was in flight
+        if (requestId !== this.latestTypesetRequestId) {
+          return;
+        }
         if (res && res.success && Array.isArray(res.pages)) {
           newPages = layoutToPageDescriptors(res.pages);
         }
       } catch (err: any) {
+        if (requestId !== this.latestTypesetRequestId) {
+          return;
+        }
         console.warn('[TOK] Rust live typesetting failed, falling back to layout conversion:', err);
       }
+    }
+
+    if (requestId !== this.latestTypesetRequestId) {
+      return;
     }
 
     if (newPages.length === 0) {
