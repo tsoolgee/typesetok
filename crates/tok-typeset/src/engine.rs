@@ -14,7 +14,7 @@ use crate::multi_flow::{FlowGeometrySpec, FlowPlacementRole, MultiFlowSolver, Sp
 use crate::shaper::PositionedGlyph;
 use rayon::prelude::*;
 use std::collections::HashMap;
-use tok_core::model::{DocumentRoot, ParagraphNode};
+use tok_core::model::{DocumentRoot, FlowType, ParagraphNode};
 use unicode_bidi::BidiInfo;
 
 const DEFAULT_FONT_FAMILY: &str = crate::font::DEFAULT_FAMILY;
@@ -632,18 +632,74 @@ impl TypesettingEngine {
             return vec![self.new_page(1, content_width, content_height, Vec::new(), None, "gemara")];
         };
 
+        // 1. Build geometric flow specs for MultiFlowSolver using flow metadata and roles
+        let flow_specs: Vec<FlowGeometrySpec> = first_sec
+            .flows
+            .iter()
+            .enumerate()
+            .map(|(idx, f)| {
+                let role = if let Some(role_str) = &f.placement_role {
+                    match role_str.to_lowercase().as_str() {
+                        "primary" => FlowPlacementRole::Primary,
+                        "inner_spine" | "innerspine" => FlowPlacementRole::InnerSpine,
+                        "outer_margin" | "outermargin" => FlowPlacementRole::OuterMargin,
+                        "bottom_band" | "bottomband" => FlowPlacementRole::BottomBand,
+                        _ => FlowPlacementRole::Column(idx),
+                    }
+                } else {
+                    match f.flow_type {
+                        FlowType::Main => FlowPlacementRole::Primary,
+                        FlowType::CommentA => FlowPlacementRole::InnerSpine,
+                        FlowType::CommentB => FlowPlacementRole::OuterMargin,
+                        FlowType::Footnote => FlowPlacementRole::BottomBand,
+                    }
+                };
+
+                let priority = match role {
+                    FlowPlacementRole::Primary => 1,
+                    FlowPlacementRole::InnerSpine => 2,
+                    FlowPlacementRole::OuterMargin => 3,
+                    FlowPlacementRole::BottomBand => 4,
+                    FlowPlacementRole::Column(c) => (c + 1) as u8,
+                };
+
+                let mut spec = FlowGeometrySpec::new(f.id.clone(), priority).with_role(role);
+                if let Some(ratio) = f.width_ratio {
+                    spec = spec.with_width_ratio(ratio);
+                } else if let Some(proportions) = &first_sec.column_proportions {
+                    if let Some(&ratio) = proportions.get(idx) {
+                        spec = spec.with_width_ratio(ratio);
+                    }
+                }
+                spec
+            })
+            .collect();
+
+        // Solve nominal column allocations to determine column width for each flow
+        let nominal_allocations = MultiFlowSolver::solve_generic_spread(
+            self.config.page_width_pt,
+            self.config.page_height_pt,
+            self.config.margin_inner_pt,
+            self.config.margin_outer_pt,
+            self.config.margin_top_pt,
+            &flow_specs,
+            SpreadSide::Recto,
+        );
+
         // Layout lines for each flow
         let mut flow_lines_map: HashMap<String, Vec<LineBox>> = HashMap::new();
         for flow in &first_sec.flows {
-            let flow_width = if flow.id.0 == "main" || flow.id.0 == "gemara" {
-                content_width * 0.40
-            } else if flow.id.0.contains("rashi") {
-                content_width * 0.28
-            } else if flow.id.0.contains("tosafot") {
-                content_width * 0.32
-            } else {
-                content_width
-            };
+            let flow_width = nominal_allocations
+                .iter()
+                .find(|a| a.flow_id == flow.id)
+                .map(|a| a.allocated_width_pt)
+                .unwrap_or(content_width);
+
+            let is_primary = flow_specs
+                .iter()
+                .find(|s| s.flow_id == flow.id)
+                .map(|s| s.role == FlowPlacementRole::Primary)
+                .unwrap_or(false);
 
             let mut lines = Vec::new();
             for p in &flow.paragraphs {
@@ -660,13 +716,12 @@ impl TypesettingEngine {
                         )
                     })
                     .unwrap_or_else(|| {
-                        let is_gemara = flow.id.0 == "main" || flow.id.0 == "gemara";
-                        let font = if is_gemara {
+                        let font = if is_primary {
                             "Frank Ruhl Libre"
                         } else {
                             "Noto Rashi Hebrew"
                         };
-                        let sz = if is_gemara { 13.5 } else { 10.5 };
+                        let sz = if is_primary { 13.5 } else { 10.5 };
                         (font.to_string(), sz, sz * 1.45)
                     });
 
@@ -682,31 +737,7 @@ impl TypesettingEngine {
             flow_lines_map.insert(flow.id.0.clone(), lines);
         }
 
-        // Build geometric flow specs for MultiFlowSolver
-        let flow_specs: Vec<FlowGeometrySpec> = first_sec
-            .flows
-            .iter()
-            .filter(|f| !f.id.0.contains("note"))
-            .map(|f| {
-                let priority = if f.id.0 == "main" || f.id.0 == "gemara" {
-                    1
-                } else if f.id.0.contains("rashi") {
-                    2
-                } else {
-                    3
-                };
-                let role = match priority {
-                    1 => FlowPlacementRole::Primary,
-                    2 => FlowPlacementRole::InnerSpine,
-                    3 => FlowPlacementRole::OuterMargin,
-                    _ => FlowPlacementRole::Primary,
-                };
-                FlowGeometrySpec::new(f.id.clone(), priority)
-                    .with_role(role)
-            })
-            .collect();
-
-        let has_notes = first_sec.flows.iter().any(|f| f.id.0.contains("note"));
+        let has_notes = flow_specs.iter().any(|s| s.role == FlowPlacementRole::BottomBand);
 
         let mut pages = Vec::new();
         let mut current_page_num = 1;
@@ -725,7 +756,8 @@ impl TypesettingEngine {
 
             let footnote_target = if has_notes { Some(50.0) } else { None };
 
-            let talmud_result = MultiFlowSolver::solve_talmud_dynamic_with_footnotes(
+            let expansion_id = first_sec.expansion_flow_id.as_ref();
+            let dynamic_result = MultiFlowSolver::solve_dynamic_spread_with_footnotes(
                 self.config.page_width_pt,
                 self.config.page_height_pt,
                 self.config.margin_inner_pt,
@@ -735,13 +767,14 @@ impl TypesettingEngine {
                 side,
                 None,
                 footnote_target,
+                expansion_id,
             );
 
             let mut page_frames = Vec::new();
             let mut any_lines_placed = false;
 
             // Place commentary & main columns
-            for alloc in &talmud_result.allocations {
+            for alloc in &dynamic_result.allocations {
                 let lines_pool = flow_lines_map.get(&alloc.flow_id.0);
                 let cursor = flow_cursors.get(&alloc.flow_id.0).copied().unwrap_or(0);
 
@@ -784,13 +817,17 @@ impl TypesettingEngine {
             }
 
             // Place footnotes if present
-            if let Some(fn_alloc) = talmud_result.footnote_allocation {
+            if let Some(fn_alloc) = dynamic_result.footnote_allocation {
                 let notes_id = first_sec
                     .flows
                     .iter()
-                    .find(|f| f.id.0.contains("note"))
+                    .find(|f| {
+                        f.flow_type == FlowType::Footnote
+                            || f.placement_role.as_deref() == Some("bottom_band")
+                            || f.id.0.contains("note")
+                    })
                     .map(|f| f.id.0.clone())
-                    .unwrap_or_else(|| "notes".to_string());
+                    .unwrap_or_else(|| fn_alloc.flow_id.0.clone());
 
                 let lines_pool = flow_lines_map.get(&notes_id);
                 let cursor = flow_cursors.get(&notes_id).copied().unwrap_or(0);
