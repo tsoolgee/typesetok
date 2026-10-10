@@ -2114,6 +2114,124 @@ describe('Phase 4: Real Rust Typesetting Engine Connection (typeset-document & t
       if (fs.existsSync(tempOut)) fs.unlinkSync(tempOut);
     }
   });
+
+  test('Integration: Live multi-flow editing, content continuity, and Tzurat HaDaf HTML layout in UI', async () => {
+    assert.ok(tokCliPath, 'tok-cli binary must be available');
+    const { spawn } = await import('node:child_process');
+    const os = await import('node:os');
+    const bridgeModule = await import('../packages/tok-ui/dist/engine/documentBridge.js');
+    const { documentStateToDocumentRoot } = bridgeModule;
+
+    // 1. Initial Talmud Tzurat HaDaf state: Gemara ends early, Rashi and Tosafot have extensive commentaries
+    const talmudEditDoc = {
+      title: 'תלמוד בבלי - ברכות ב',
+      templateType: 'talmud',
+      flows: {
+        gemara: [
+          {
+            id: 'g-init-1',
+            styleId: 'style-gemara-main',
+            text: 'מַאימָתַי קוֹרִין אֶת שְׁמַע בְּעַרְבִית? מִשָּׁעָה שֶׁהַכֹּהֲנִים נִכְנָסִים לֶאֱכֹל בִּתְרוּמָתָן.'
+          }
+        ],
+        rashi: [
+          {
+            id: 'r-init-1',
+            styleId: 'style-rashi-body',
+            text: 'מאימתי קורין את שמע בערבית: משעת צאת הכוכבים, והא דתנן משעה שהכהנים נכנסים לאכול בתרומתן, היינו צאת הכוכבים כדמפרש בגמרא.'
+          },
+          {
+            id: 'r-init-2',
+            styleId: 'style-rashi-body',
+            text: 'לתרומתן: כהנים שנטמאו וטבלו והעריב שמשן ומותרים לאכול בתרומה.'
+          }
+        ],
+        tosafot: [
+          {
+            id: 't-init-1',
+            styleId: 'style-tosafot-body',
+            text: 'מאימתי קורין: תימה דבכל דוכתא פריך תנא היכא קאי ומהדר תנא דבי ר\"י, והכא לא פריך הכי משום דפתח בערבית ברישא.'
+          }
+        ],
+        notes: []
+      }
+    };
+
+    const tempIn1 = path.join(os.tmpdir(), `talmud_live1_in_${Date.now()}.json`);
+    const tempOut1 = path.join(os.tmpdir(), `talmud_live1_out_${Date.now()}.json`);
+    let pages1;
+
+    try {
+      fs.writeFileSync(tempIn1, JSON.stringify(documentStateToDocumentRoot(talmudEditDoc), null, 2), 'utf-8');
+      const exitCode1 = await new Promise((resolve) => {
+        const proc = spawn(tokCliPath, ['typeset-document', tempIn1, tempOut1], { windowsHide: true });
+        proc.on('close', resolve);
+      });
+
+      assert.equal(exitCode1, 0, 'Initial typeset must succeed');
+      pages1 = JSON.parse(fs.readFileSync(tempOut1, 'utf-8'));
+    } finally {
+      if (fs.existsSync(tempIn1)) fs.unlinkSync(tempIn1);
+      if (fs.existsSync(tempOut1)) fs.unlinkSync(tempOut1);
+    }
+
+    assert.ok(pages1.length >= 1, 'Must have at least 1 page');
+    const desc1 = layoutToPageDescriptors(pages1);
+    assert.equal(desc1.length, pages1.length, 'Page descriptors length must match layout box count');
+
+    const html1 = desc1[0].htmlContent;
+    assert.ok(html1.includes('tok-interactive-frame'), 'HTML must render interactive flow frame container');
+    assert.ok(html1.includes('data-flow-id="gemara"'), 'HTML must render gemara flow frame');
+    assert.ok(html1.includes('data-flow-id="rashi"'), 'HTML must render rashi flow frame');
+    assert.ok(html1.includes('data-flow-id="tosafot"'), 'HTML must render tosafot flow frame');
+    assert.ok(html1.includes('tok-line-box'), 'HTML must contain rendered text lines');
+    assert.ok(html1.includes('בִּתְרוּמָתָן'), 'HTML must preserve Hebrew Niqqud accurately');
+
+    // 2. Perform live edit: add more commentary to Rashi & Tosafot
+    talmudEditDoc.flows.rashi.push({
+      id: 'r-edit-3',
+      styleId: 'style-rashi-body',
+      text: 'והעריב שמשן: ביאת שמשו מעכבתו מלאכול בתרומה עד שיעריב השמש ויטהר לגמרי.'
+    });
+    talmudEditDoc.flows.tosafot.push({
+      id: 't-edit-2',
+      styleId: 'style-tosafot-body',
+      text: 'ואם תאמר: והא קימא לן תפלת ערבית רשות, ויש לומר דקריאת שמע חובת גברא היא ולא דמיא לתפלה.'
+    });
+
+    const tempIn2 = path.join(os.tmpdir(), `talmud_live2_in_${Date.now()}.json`);
+    const tempOut2 = path.join(os.tmpdir(), `talmud_live2_out_${Date.now()}.json`);
+    let pages2;
+
+    try {
+      fs.writeFileSync(tempIn2, JSON.stringify(documentStateToDocumentRoot(talmudEditDoc), null, 2), 'utf-8');
+      const exitCode2 = await new Promise((resolve) => {
+        const proc = spawn(tokCliPath, ['typeset-document', tempIn2, tempOut2], { windowsHide: true });
+        proc.on('close', resolve);
+      });
+
+      assert.equal(exitCode2, 0, 'Re-typesetting edited document must succeed');
+      pages2 = JSON.parse(fs.readFileSync(tempOut2, 'utf-8'));
+    } finally {
+      if (fs.existsSync(tempIn2)) fs.unlinkSync(tempIn2);
+      if (fs.existsSync(tempOut2)) fs.unlinkSync(tempOut2);
+    }
+
+    const desc2 = layoutToPageDescriptors(pages2);
+    assert.ok(desc2.length >= 1, 'Must have at least 1 page descriptor');
+
+    // Total lines across all pages should increase after editing
+    const totalLines1 = pages1.reduce((sum, p) => sum + p.frames.reduce((fs, f) => fs + f.lines.length, 0), 0);
+    const totalLines2 = pages2.reduce((sum, p) => sum + p.frames.reduce((fs, f) => fs + f.lines.length, 0), 0);
+    assert.ok(totalLines2 > totalLines1, 'Edited multi-flow document must contain more typeset lines');
+
+    // Verify all edited content appears in the HTML output without text loss
+    const combinedHtml2 = desc2.map((d) => d.htmlContent).join(' ');
+    assert.ok(combinedHtml2.includes('ביאת שמשו מעכבתו'), 'New Rashi edit must be rendered in HTML');
+    assert.ok(combinedHtml2.includes('חובת גברא'), 'New Tosafot edit must be rendered in HTML');
+    assert.ok(combinedHtml2.includes('מַאימָתַי קוֹרִין'), 'Original Gemara content must remain completely intact');
+    assert.ok(combinedHtml2.includes('בִּתְרוּמָתָן'), 'Original Gemara Niqqud must remain completely intact');
+  });
 });
 
 
