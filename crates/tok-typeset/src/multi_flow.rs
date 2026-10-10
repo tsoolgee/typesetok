@@ -88,8 +88,11 @@ pub struct DynamicTalmudPageResult {
     pub allocations: Vec<SolvedFlowAllocation>,
     pub footnote_allocation: Option<SolvedFlowAllocation>,
     pub gemara_height_pt: f32,
+    pub primary_height_pt: f32,
     pub has_l_shape_expansion: bool,
 }
+
+pub type DynamicPageResult = DynamicTalmudPageResult;
 
 /// Column a flow is placed in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -364,6 +367,35 @@ impl MultiFlowSolver {
         gemara_target_height_pt: Option<f32>,
         footnote_target_height_pt: Option<f32>,
     ) -> DynamicTalmudPageResult {
+        Self::solve_dynamic_spread_with_footnotes(
+            page_width_pt,
+            page_height_pt,
+            margin_inner_pt,
+            margin_outer_pt,
+            margin_y_pt,
+            flows,
+            side,
+            gemara_target_height_pt,
+            footnote_target_height_pt,
+            None,
+        )
+    }
+
+    /// Solves dynamic layout with L-shaped commentary expansion below primary stream
+    /// and bottom-anchored floating footnotes for arbitrary flows.
+    #[allow(clippy::too_many_arguments)]
+    pub fn solve_dynamic_spread_with_footnotes(
+        page_width_pt: f32,
+        page_height_pt: f32,
+        margin_inner_pt: f32,
+        margin_outer_pt: f32,
+        margin_y_pt: f32,
+        flows: &[FlowGeometrySpec],
+        side: SpreadSide,
+        primary_target_height_pt: Option<f32>,
+        footnote_target_height_pt: Option<f32>,
+        expansion_flow_id: Option<&FlowId>,
+    ) -> DynamicTalmudPageResult {
         let (margin_left, margin_right) = Self::margins(margin_inner_pt, margin_outer_pt, side);
 
         let content_width = non_negative(page_width_pt - margin_left - margin_right);
@@ -371,14 +403,26 @@ impl MultiFlowSolver {
         let gutter = Self::gutter_for(content_width);
 
         // 1. Allocate Floating Footnotes at bottom
-        let footnote_allocation = match footnote_target_height_pt.map(non_negative) {
+        let footnote_flow = flows
+            .iter()
+            .find(|f| f.role == FlowPlacementRole::BottomBand || f.flow_id.0 == "footnote");
+
+        let footnote_target = footnote_target_height_pt.or_else(|| {
+            footnote_flow.map(|f| f.target_height_pt)
+        });
+
+        let footnote_allocation = match footnote_target.map(non_negative) {
             Some(fn_height) if fn_height > 0.0 => {
                 let actual_fn_height = fn_height.min(available_height * 0.40);
                 let fn_y = margin_y_pt + available_height - actual_fn_height;
                 available_height = non_negative(available_height - actual_fn_height - gutter);
 
+                let fn_id = footnote_flow
+                    .map(|f| f.flow_id.clone())
+                    .unwrap_or_else(|| FlowId::new("footnote"));
+
                 Some(SolvedFlowAllocation {
-                    flow_id: FlowId::new("footnote"),
+                    flow_id: fn_id,
                     allocated_x_pt: margin_left,
                     allocated_y_pt: fn_y,
                     allocated_width_pt: content_width,
@@ -388,39 +432,72 @@ impl MultiFlowSolver {
             _ => None,
         };
 
-        // 2. Compute 3-column allocation
-        let mut allocations = Self::solve_talmud_spread(
+        // 2. Compute column allocation (excluding bottom band)
+        let column_flows: Vec<FlowGeometrySpec> = flows
+            .iter()
+            .filter(|f| f.role != FlowPlacementRole::BottomBand)
+            .cloned()
+            .collect();
+
+        let mut allocations = Self::solve_generic_spread(
             page_width_pt,
             available_height + 2.0 * margin_y_pt,
             margin_inner_pt,
             margin_outer_pt,
             margin_y_pt,
-            flows,
+            &column_flows,
             side,
         );
 
-        // 3. Dynamic L-Shaped expansion if Gemara ends before the bottom and
-        //    there is a commentary to flow into the freed space.
-        let main_index = flows.iter().position(|f| FlowRole::of(f) == FlowRole::Main);
-        let has_commentary = flows.iter().any(|f| FlowRole::of(f) != FlowRole::Main);
-        let mut has_l_shape = false;
-        let gemara_h = match gemara_target_height_pt {
-            Some(target_h) => {
-                let actual_gemara_h = non_negative(target_h).min(available_height);
-                if actual_gemara_h < available_height - Self::L_SHAPE_MIN_GAP_PT {
-                    if let (Some(main_index), true) = (main_index, has_commentary) {
-                        let gemara_alloc = &mut allocations[main_index];
-                        gemara_alloc.allocated_height_pt = actual_gemara_h;
-                        let (gx, gw) =
-                            (gemara_alloc.allocated_x_pt, gemara_alloc.allocated_width_pt);
+        // 3. Dynamic L-Shaped expansion if primary stream ends before bottom and
+        //    there is a commentary flow to expand into the freed space.
+        let primary_index = column_flows.iter().position(|f| {
+            f.role == FlowPlacementRole::Primary
+                || f.priority == 1
+                || FlowRole::of(f) == FlowRole::Main
+        });
 
-                        // Commentary continues in the space freed under the
-                        // Gemara column (classic Tzurat HaDaf), without
-                        // overlapping the side columns.
-                        let expansion_y = margin_y_pt + actual_gemara_h + gutter;
-                        let expansion_h = non_negative(available_height - actual_gemara_h - gutter);
+        let commentary_spec = if let Some(exp_id) = expansion_flow_id {
+            column_flows.iter().find(|f| &f.flow_id == exp_id)
+        } else {
+            column_flows.iter().find(|f| {
+                f.role == FlowPlacementRole::InnerSpine
+                    || f.priority == 2
+                    || FlowRole::of(f) == FlowRole::Rashi
+            }).or_else(|| {
+                column_flows
+                    .iter()
+                    .enumerate()
+                    .find(|(idx, _)| Some(*idx) != primary_index)
+                    .map(|(_, f)| f)
+            })
+        };
+
+        let has_commentary = commentary_spec.is_some() && column_flows.len() > 1;
+        let mut has_l_shape = false;
+        let primary_h = match primary_target_height_pt {
+            Some(target_h) => {
+                let actual_primary_h = non_negative(target_h).min(available_height);
+                if actual_primary_h < available_height - Self::L_SHAPE_MIN_GAP_PT && has_commentary {
+                    if let (Some(primary_idx), Some(comm_spec)) = (primary_index, commentary_spec) {
+                        let primary_alloc = &mut allocations[primary_idx];
+                        primary_alloc.allocated_height_pt = actual_primary_h;
+                        let (gx, gw) = (
+                            primary_alloc.allocated_x_pt,
+                            primary_alloc.allocated_width_pt,
+                        );
+
+                        let expansion_y = margin_y_pt + actual_primary_h + gutter;
+                        let expansion_h = non_negative(available_height - actual_primary_h - gutter);
+
+                        let exp_id = if comm_spec.flow_id.0 == "rashi" {
+                            FlowId::new("rashi_expansion")
+                        } else {
+                            FlowId::new(format!("{}_expansion", comm_spec.flow_id.0))
+                        };
+
                         allocations.push(SolvedFlowAllocation {
-                            flow_id: FlowId::new("rashi_expansion"),
+                            flow_id: exp_id,
                             allocated_x_pt: gx,
                             allocated_y_pt: expansion_y,
                             allocated_width_pt: gw,
@@ -429,7 +506,7 @@ impl MultiFlowSolver {
                         has_l_shape = true;
                     }
                 }
-                actual_gemara_h
+                actual_primary_h
             }
             None => available_height,
         };
@@ -437,7 +514,8 @@ impl MultiFlowSolver {
         DynamicTalmudPageResult {
             allocations,
             footnote_allocation,
-            gemara_height_pt: gemara_h,
+            gemara_height_pt: primary_h,
+            primary_height_pt: primary_h,
             has_l_shape_expansion: has_l_shape,
         }
     }
