@@ -180,3 +180,120 @@ impl LayoutTemplate {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_valid_template_validation() {
+        let mut t = LayoutTemplate::new(LayoutFamily::SingleFlow { flow_id: FlowId::main() });
+        t.flow_specs.push(FlowGeometrySpec::new(FlowId::main(), 1));
+        t.nominal_proportions = vec![1.0];
+
+        let res = t.validate(595.0, 842.0, 80.0, 72.0);
+        assert!(res.is_ok());
+    }
+
+    #[test]
+    fn test_empty_flow_specs_error() {
+        let t = LayoutTemplate::new(LayoutFamily::SingleFlow { flow_id: FlowId::main() });
+        let res = t.validate(595.0, 842.0, 80.0, 72.0);
+        assert_eq!(res, Err(TemplateConstraintError::EmptyFlowSpecs));
+    }
+
+    #[test]
+    fn test_insufficient_page_geometry_error() {
+        let mut t = LayoutTemplate::new(LayoutFamily::SingleFlow { flow_id: FlowId::main() });
+        t.flow_specs.push(FlowGeometrySpec::new(FlowId::main(), 1));
+
+        // Margins exceed page width (595.0 < 600.0)
+        let res = t.validate(595.0, 842.0, 600.0, 72.0);
+        match res {
+            Err(TemplateConstraintError::InsufficientPageGeometry { printable_width_pt, .. }) => {
+                assert!(printable_width_pt <= 0.0);
+            }
+            other => panic!("Expected InsufficientPageGeometry, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_duplicate_flow_id_error() {
+        let mut t = LayoutTemplate::new(LayoutFamily::ParallelColumns {
+            column_count: 2,
+            proportions: None,
+            flow_ids: vec![FlowId::new("col"), FlowId::new("col")],
+        });
+        t.flow_specs.push(FlowGeometrySpec::new(FlowId::new("col"), 1));
+        t.flow_specs.push(FlowGeometrySpec::new(FlowId::new("col"), 2));
+
+        let res = t.validate(595.0, 842.0, 80.0, 72.0);
+        assert_eq!(res, Err(TemplateConstraintError::DuplicateFlowId(FlowId::new("col"))));
+    }
+
+    #[test]
+    fn test_missing_referenced_expansion_flow_error() {
+        let mut t = LayoutTemplate::new(LayoutFamily::TzuratHaDaf {
+            primary_flow: FlowId::new("gemara"),
+            spine_inner_flow: Some(FlowId::new("rashi")),
+            spine_outer_flow: Some(FlowId::new("tosafot")),
+            expansion_flow: Some(FlowId::new("non_existent_stream")),
+            has_bottom_band: false,
+        });
+        t.flow_specs.push(FlowGeometrySpec::new(FlowId::new("gemara"), 1));
+        t.flow_specs.push(FlowGeometrySpec::new(FlowId::new("rashi"), 2));
+        t.flow_specs.push(FlowGeometrySpec::new(FlowId::new("tosafot"), 3));
+        t.expansion_flow_id = Some(FlowId::new("non_existent_stream"));
+
+        let res = t.validate(595.0, 842.0, 80.0, 72.0);
+        assert_eq!(
+            res,
+            Err(TemplateConstraintError::MissingReferencedFlow {
+                role: "expansion",
+                flow_id: FlowId::new("non_existent_stream"),
+            })
+        );
+    }
+
+    #[test]
+    fn test_proportions_count_mismatch_error() {
+        let mut t = LayoutTemplate::new(LayoutFamily::ParallelColumns {
+            column_count: 2,
+            proportions: Some(vec![0.5, 0.3, 0.2]),
+            flow_ids: vec![FlowId::new("c1"), FlowId::new("c2")],
+        });
+        t.flow_specs.push(FlowGeometrySpec::new(FlowId::new("c1"), 1));
+        t.flow_specs.push(FlowGeometrySpec::new(FlowId::new("c2"), 2));
+        t.nominal_proportions = vec![0.5, 0.3, 0.2]; // 3 proportions for 2 columns
+
+        let res = t.validate(595.0, 842.0, 80.0, 72.0);
+        assert_eq!(
+            res,
+            Err(TemplateConstraintError::ProportionCountMismatch {
+                proportions_count: 3,
+                columns_count: 2,
+            })
+        );
+    }
+
+    #[test]
+    fn test_invalid_proportions_non_positive_error() {
+        let mut t = LayoutTemplate::new(LayoutFamily::ParallelColumns {
+            column_count: 2,
+            proportions: Some(vec![0.5, -0.1]),
+            flow_ids: vec![FlowId::new("c1"), FlowId::new("c2")],
+        });
+        t.flow_specs.push(FlowGeometrySpec::new(FlowId::new("c1"), 1));
+        t.flow_specs.push(FlowGeometrySpec::new(FlowId::new("c2"), 2));
+        t.nominal_proportions = vec![0.5, -0.1];
+
+        let res = t.validate(595.0, 842.0, 80.0, 72.0);
+        match res {
+            Err(TemplateConstraintError::InvalidProportions { message }) => {
+                assert!(message.contains("invalid"));
+            }
+            other => panic!("Expected InvalidProportions, got {:?}", other),
+        }
+    }
+}
+
