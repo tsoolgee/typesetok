@@ -30,6 +30,7 @@ import {
   documentStateToDocumentRoot,
   documentRootToDocumentState
 } from './engine/documentBridge';
+import { layoutToPageDescriptors } from './engine/typesetBridge';
 
 import { toHebrewGematria } from './gematria';
 export { toHebrewGematria };
@@ -995,9 +996,27 @@ export class TypesetOkApp {
     }, 120);
   }
 
-  private repaginateAndSync(forceReset = false): void {
-    const minPages = Math.max(1, this.pages.length);
-    const newPages = FlowPaginator.paginateDocument(this.documentState, minPages);
+  private async repaginateAndSync(forceReset = false): Promise<void> {
+    const win = window as any;
+    let newPages: PageDescriptor[] = [];
+
+    if (win.tokIpc?.typesetDocument) {
+      try {
+        const docRoot = documentStateToDocumentRoot(this.documentState);
+        const res = await win.tokIpc.typesetDocument({ document: docRoot });
+        if (res && res.success && Array.isArray(res.pages)) {
+          newPages = layoutToPageDescriptors(res.pages);
+        }
+      } catch (err: any) {
+        console.warn('[TOK] Rust live typesetting failed, falling back to layout conversion:', err);
+      }
+    }
+
+    if (newPages.length === 0) {
+      const minPages = Math.max(1, this.pages.length);
+      newPages = FlowPaginator.paginateDocument(this.documentState, minPages);
+    }
+
     this.pages = newPages;
     this.canvas.setPages(newPages, this.activePageIndex);
     this.refreshThumbnails();
