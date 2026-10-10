@@ -1755,5 +1755,136 @@ mod tests {
             assert!(rashi_combined.contains(&format!("פסקה מספר {}:", i)), "Rashi paragraph {} must not be dropped", i);
         }
     }
+
+    #[test]
+    fn test_typeset_document_auto_classified_tzurat_hadaf_unfamiliar_names() {
+        use tok_core::model::{Flow, FlowId};
+
+        let mut doc = DocumentRoot::new("תבנית צורת הדף עם שמות מותאמים");
+        let sec = &mut doc.sections[0];
+        sec.flows.clear();
+
+        // 3 flows with inner_spine and outer_margin roles
+        let mut central = Flow::new(FlowId::new("text_core"), FlowType::Main);
+        central.placement_role = Some("primary".to_string());
+        central.add_paragraph(ParagraphNode::new(
+            FractionalIndex::new("p1"),
+            "style-main",
+            "טקסט מרכזי עיקרי לבדיקת פריסת צורת הדף.",
+        ));
+        sec.flows.push(central);
+
+        let mut inner = Flow::new(FlowId::new("annotation_a"), FlowType::CommentA);
+        inner.placement_role = Some("inner_spine".to_string());
+        inner.add_paragraph(ParagraphNode::new(
+            FractionalIndex::new("p2"),
+            "style-inner",
+            "הערה פנימית לצד השדרה בטקסט מסורתי.",
+        ));
+        sec.flows.push(inner);
+
+        let mut outer = Flow::new(FlowId::new("annotation_b"), FlowType::CommentB);
+        outer.placement_role = Some("outer_margin".to_string());
+        outer.add_paragraph(ParagraphNode::new(
+            FractionalIndex::new("p3"),
+            "style-outer",
+            "הערה חיצונית בשוליים החיצוניים של הדף.",
+        ));
+        sec.flows.push(outer);
+
+        let pages = engine().typeset_document(&doc);
+        assert!(!pages.is_empty());
+        let p0 = &pages[0];
+        assert_eq!(p0.frames.len(), 3);
+
+        let frame_ids: Vec<&str> = p0.frames.iter().map(|f| f.flow_id.as_str()).collect();
+        assert!(frame_ids.contains(&"text_core"));
+        assert!(frame_ids.contains(&"annotation_a"));
+        assert!(frame_ids.contains(&"annotation_b"));
+
+        // Frame widths and heights must be positive
+        for frame in &p0.frames {
+            assert!(frame.rect.width > 50.0);
+            assert!(frame.rect.height > 10.0);
+        }
+    }
+
+    #[test]
+    fn test_typeset_document_auto_classified_parallel_columns() {
+        use tok_core::model::{Flow, FlowId};
+
+        let mut doc = DocumentRoot::new("עמודות מקבילות");
+        let sec = &mut doc.sections[0];
+        sec.flows.clear();
+
+        let mut col1 = Flow::new(FlowId::new("hebrew_source"), FlowType::Main);
+        col1.placement_role = Some("column_0".to_string());
+        col1.add_paragraph(ParagraphNode::new(
+            FractionalIndex::new("c1"),
+            "style-col",
+            "עמודה ראשונה מקור עברי.",
+        ));
+        sec.flows.push(col1);
+
+        let mut col2 = Flow::new(FlowId::new("aramaic_targum"), FlowType::Main);
+        col2.placement_role = Some("column_1".to_string());
+        col2.add_paragraph(ParagraphNode::new(
+            FractionalIndex::new("c2"),
+            "style-col",
+            "עמודה שנייה תרגום ארמי מקביל.",
+        ));
+        sec.flows.push(col2);
+
+        let pages = engine().typeset_document(&doc);
+        assert!(!pages.is_empty());
+        let p0 = &pages[0];
+        assert_eq!(p0.frames.len(), 2);
+
+        let f0 = p0.frames.iter().find(|f| f.flow_id == "hebrew_source").unwrap();
+        let f1 = p0.frames.iter().find(|f| f.flow_id == "aramaic_targum").unwrap();
+        assert!((f0.rect.width - f1.rect.width).abs() < 5.0, "Parallel columns should have equal widths by default");
+    }
+
+    #[test]
+    fn test_typeset_document_explicit_template_override() {
+        use tok_core::model::{Flow, FlowId};
+
+        let mut doc = DocumentRoot::new("עקיפת תבנית מפורשת");
+        let sec = &mut doc.sections[0];
+        sec.flows.clear();
+        sec.layout_kind = Some("parallel_columns".to_string());
+        sec.column_proportions = Some(vec![0.30, 0.70]);
+
+        let mut stream_a = Flow::new(FlowId::new("stream_a"), FlowType::Main);
+        stream_a.add_paragraph(ParagraphNode::new(
+            FractionalIndex::new("a1"),
+            "style-a",
+            "זרימה א צרה יחסית.",
+        ));
+        sec.flows.push(stream_a);
+
+        let mut stream_b = Flow::new(FlowId::new("stream_b"), FlowType::Main);
+        stream_b.add_paragraph(ParagraphNode::new(
+            FractionalIndex::new("b1"),
+            "style-b",
+            "זרימה ב רחבה יחסית התופסת את רוב רוחב העמוד.",
+        ));
+        sec.flows.push(stream_b);
+
+        let pages = engine().typeset_document(&doc);
+        assert!(!pages.is_empty());
+        let p0 = &pages[0];
+        assert_eq!(p0.frames.len(), 2);
+
+        let fa = p0.frames.iter().find(|f| f.flow_id == "stream_a").unwrap();
+        let fb = p0.frames.iter().find(|f| f.flow_id == "stream_b").unwrap();
+
+        // Check ratio matches ~ 0.30 / 0.70
+        let total_w = fa.rect.width + fb.rect.width;
+        let ratio_a = fa.rect.width / total_w;
+        let ratio_b = fb.rect.width / total_w;
+        assert!((ratio_a - 0.30).abs() < 0.05, "Ratio A should be approx 0.30, got {}", ratio_a);
+        assert!((ratio_b - 0.70).abs() < 0.05, "Ratio B should be approx 0.70, got {}", ratio_b);
+    }
 }
 
