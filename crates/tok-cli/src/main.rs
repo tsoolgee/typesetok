@@ -23,6 +23,8 @@ USAGE:
 COMMANDS:
     render-pdf <INPUT> <OUTPUT>     Render a .tok, .json, or demo document to ISO PDF/X-1a
     render-html <INPUT> <OUTPUT>    Render a .tok, .json, or demo document to pre-paginated HTML
+    save-package <INPUT> <OUTPUT>   Save document JSON into an atomic .tok package
+    open-package <INPUT> <OUTPUT>   Open and extract a .tok package into document JSON
     benchmark-typeset [--pages N]   Run 1,000-page stress test and cascade latency benchmark
     verify-determinism              Verify bit-for-bit layout & PDF output determinism
     inspect-package <INPUT>         Inspect .tok package manifest, metadata, and assets
@@ -464,6 +466,39 @@ fn handle_inspect_package(input: &str) -> Result<(), Box<dyn std::error::Error>>
     Ok(())
 }
 
+fn handle_save_package(input: &str, output: &str) -> Result<(), Box<dyn std::error::Error>> {
+    println!("[TOK-CLI] Saving document package to .tok: {}", output);
+    let (doc, manifest) = load_document_input(input, 1)?;
+    let mut pkg = TokPackage::new();
+    pkg.manifest = manifest;
+
+    if let Some(parent) = Path::new(output).parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)?;
+        }
+    }
+
+    pkg.save_atomic(&doc, output)?;
+    println!("  [SUCCESS] Saved .tok package to: {}", output);
+    Ok(())
+}
+
+fn handle_open_package(input: &str, output: &str) -> Result<(), Box<dyn std::error::Error>> {
+    println!("[TOK-CLI] Opening .tok package from: {}", input);
+    let (doc, _pkg) = TokPackage::open(input)?;
+
+    if let Some(parent) = Path::new(output).parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)?;
+        }
+    }
+
+    let json_bytes = serde_json::to_vec_pretty(doc.root())?;
+    fs::write(output, json_bytes)?;
+    println!("  [SUCCESS] Extracted document JSON to: {}", output);
+    Ok(())
+}
+
 fn main() {
     if let Err(e) = run() {
         eprintln!("Error: {}", e);
@@ -492,6 +527,20 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 std::process::exit(1);
             }
             handle_render_html(&args[2], &args[3])?;
+        }
+        "save-package" => {
+            if args.len() < 4 {
+                eprintln!("Usage: tok-cli save-package <INPUT.json> <OUTPUT.tok>");
+                std::process::exit(1);
+            }
+            handle_save_package(&args[2], &args[3])?;
+        }
+        "open-package" => {
+            if args.len() < 4 {
+                eprintln!("Usage: tok-cli open-package <INPUT.tok> <OUTPUT.json>");
+                std::process::exit(1);
+            }
+            handle_open_package(&args[2], &args[3])?;
         }
         "benchmark-typeset" => {
             let mut pages = 1000;
