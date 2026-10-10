@@ -10,7 +10,7 @@ use crate::geometry::{
 };
 use crate::hebrew_justify::HebrewJustifier;
 use crate::knuth_plass::{KnuthPlassBreaker, LayoutItem, MeasureProfile};
-use crate::multi_flow::{FlowGeometrySpec, MultiFlowSolver, SpreadSide};
+use crate::multi_flow::{FlowGeometrySpec, FlowPlacementRole, MultiFlowSolver, SpreadSide};
 use crate::shaper::PositionedGlyph;
 use rayon::prelude::*;
 use std::collections::HashMap;
@@ -695,13 +695,14 @@ impl TypesettingEngine {
                 } else {
                     3
                 };
-                FlowGeometrySpec {
-                    flow_id: f.id.clone(),
-                    priority,
-                    min_width_pt: 50.0,
-                    max_width_pt: content_width,
-                    target_height_pt: content_height,
-                }
+                let role = match priority {
+                    1 => FlowPlacementRole::Primary,
+                    2 => FlowPlacementRole::InnerSpine,
+                    3 => FlowPlacementRole::OuterMargin,
+                    _ => FlowPlacementRole::Primary,
+                };
+                FlowGeometrySpec::new(f.id.clone(), priority)
+                    .with_role(role)
             })
             .collect();
 

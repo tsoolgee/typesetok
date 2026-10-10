@@ -28,7 +28,8 @@ pub use hebrew_justify::{HebrewJustifier, JustificationTier, JustifiedLine, AHAL
 pub use hit_test::{HitTestResult, HitTester};
 pub use knuth_plass::{BrokenLine, KnuthPlassBreaker, LayoutItem, LineSpan, MeasureProfile};
 pub use multi_flow::{
-    DynamicTalmudPageResult, FlowGeometrySpec, MultiFlowSolver, SolvedFlowAllocation, SpreadSide,
+    DynamicTalmudPageResult, FlowGeometrySpec, FlowPlacementRole, MultiFlowSolver,
+    SolvedFlowAllocation, SpreadSide,
 };
 pub use shaper::{PositionedGlyph, ShapedRun, TextShaper};
 

@@ -17,13 +17,61 @@ pub enum SpreadSide {
     Verso,
 }
 
+/// Placement role of a text stream on a page layout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FlowPlacementRole {
+    /// Primary content stream (central column in Talmud/classic, or leading column in dual-stream).
+    #[default]
+    Primary,
+    /// Commentary along the inner spine edge (left on Recto, right on Verso in RTL).
+    InnerSpine,
+    /// Commentary along the outer margin edge (right on Recto, left on Verso in RTL).
+    OuterMargin,
+    /// Footnote or apparatus band across the bottom of the page.
+    BottomBand,
+    /// Arbitrary parallel column index (0-based across physical spread).
+    Column(usize),
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct FlowGeometrySpec {
     pub flow_id: FlowId,
-    pub priority: u8, // 1 = Main Gemara text (highest), 2 = Rashi, 3 = Tosafot
+    pub priority: u8,
+    pub role: FlowPlacementRole,
+    pub width_ratio: Option<f32>,
     pub min_width_pt: f32,
     pub max_width_pt: f32,
     pub target_height_pt: f32,
+}
+
+impl FlowGeometrySpec {
+    pub fn new(flow_id: FlowId, priority: u8) -> Self {
+        let role = match priority {
+            1 => FlowPlacementRole::Primary,
+            2 => FlowPlacementRole::InnerSpine,
+            3 => FlowPlacementRole::OuterMargin,
+            _ => FlowPlacementRole::Primary,
+        };
+        Self {
+            flow_id,
+            priority,
+            role,
+            width_ratio: None,
+            min_width_pt: 50.0,
+            max_width_pt: 1000.0,
+            target_height_pt: 500.0,
+        }
+    }
+
+    pub fn with_role(mut self, role: FlowPlacementRole) -> Self {
+        self.role = role;
+        self
+    }
+
+    pub fn with_width_ratio(mut self, ratio: f32) -> Self {
+        self.width_ratio = Some(ratio);
+        self
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -53,12 +101,19 @@ enum FlowRole {
 
 impl FlowRole {
     fn of(spec: &FlowGeometrySpec) -> Self {
-        if spec.flow_id.0 == "main" || spec.priority == 1 {
-            FlowRole::Main
-        } else if spec.flow_id.0.contains("rashi") || spec.priority == 2 {
-            FlowRole::Rashi
-        } else {
-            FlowRole::Tosafot
+        match spec.role {
+            FlowPlacementRole::Primary => FlowRole::Main,
+            FlowPlacementRole::InnerSpine => FlowRole::Rashi,
+            FlowPlacementRole::OuterMargin => FlowRole::Tosafot,
+            _ => {
+                if spec.priority == 1 || spec.flow_id.0 == "main" {
+                    FlowRole::Main
+                } else if spec.priority == 2 {
+                    FlowRole::Rashi
+                } else {
+                    FlowRole::Tosafot
+                }
+            }
         }
     }
 }
@@ -283,13 +338,7 @@ mod tests {
     use super::*;
 
     fn spec(id: &str, priority: u8) -> FlowGeometrySpec {
-        FlowGeometrySpec {
-            flow_id: FlowId::new(id),
-            priority,
-            min_width_pt: 50.0,
-            max_width_pt: 300.0,
-            target_height_pt: 500.0,
-        }
+        FlowGeometrySpec::new(FlowId::new(id), priority)
     }
 
     fn talmud_flows() -> Vec<FlowGeometrySpec> {
