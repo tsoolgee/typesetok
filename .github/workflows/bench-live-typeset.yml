@@ -1,0 +1,61 @@
+name: Bench Live Typeset
+
+on:
+  push:
+    branches: [perf/measure-036]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  bench:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Prepare both versions
+        shell: pwsh
+        run: |
+          git fetch --no-tags https://github.com/TypesetOK/typesetok.git refs/tags/v0.35.2:refs/tags/v0.35.2
+          git worktree add ..\v352 v0.35.2
+          npm install --ignore-scripts
+          cargo build --release -p tok-cli
+          Copy-Item target\release\tok-cli.exe ..\tok-cli-361.exe
+          Push-Location ..\v352
+          cargo build --release -p tok-cli
+          Copy-Item target\release\tok-cli.exe ..\tok-cli-352.exe
+          Pop-Location
+
+      - name: Bench
+        shell: pwsh
+        run: |
+          $b = "scripts/bench-live-typeset.mjs"
+          $out = @()
+          foreach ($n in 150, 600, 1500) {
+            $out += node $b ..\v352 ..\tok-cli-352.exe "0.35.2 (app)" $n
+            $out += node $b . ..\tok-cli-361.exe "0.36.1 (app: preflight+assets)" $n --with-preflight --assets-from '@PKG'
+            $out += node $b . ..\tok-cli-361.exe "0.36.1 preflight only" $n --with-preflight
+            $out += node $b . ..\tok-cli-361.exe "0.36.1 assets only" $n --assets-from '@PKG'
+            $out += node $b . ..\tok-cli-361.exe "0.36.1 neither" $n
+            $out += ""
+          }
+          $out | ForEach-Object { Write-Host $_ }
+          New-Item -ItemType Directory -Force bench-out | Out-Null
+          $out | Out-File bench-out\report.txt -Encoding utf8
+          "``````" | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          $out | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          "``````" | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bench-live-typeset
+          path: bench-out/
