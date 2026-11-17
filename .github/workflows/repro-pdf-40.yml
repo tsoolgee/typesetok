@@ -1,0 +1,71 @@
+name: Repro PDF 40
+
+on:
+  push:
+    branches: [debug/pdf-40]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  repro:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Build before and after
+        run: |
+          sudo apt-get install -y poppler-utils > /dev/null
+          npm install --ignore-scripts
+          cargo build --release -p tok-cli
+          cp target/release/tok-cli ../tok-cli-after
+          git fetch --no-tags https://github.com/TypesetOK/typesetok.git main:upstream-main
+          git worktree add ../before upstream-main
+          (cd ../before && cargo build --release -p tok-cli && cp target/release/tok-cli ../tok-cli-before)
+      - name: Render
+        run: |
+          mkdir -p out
+          for v in before after; do
+            echo "===== $v"
+            node scripts/repro-pdf-40.mjs ../tok-cli-$v out/$v
+            pdftoppm -r 110 -f 1 -l 1 -jpeg -x 0 -y 0 -W 920 -H 520 out/$v.pdf out/$v
+            pdffonts out/$v.pdf
+            pdftotext -layout out/$v.pdf - | head -20
+            echo "IMG64-$v $(base64 -w0 out/$v-1.jpg)"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: repro-pdf-40
+          path: out/
+
+  tests:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Rust checks
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+      - name: Build tok-cli
+        run: cargo build --release -p tok-cli
+      - name: Frontend build and tests
+        shell: pwsh
+        env:
+          TOK_CLI_PATH: target/release/tok-cli.exe
+        run: |
+          npm install
+          npm run build
+          npm test
