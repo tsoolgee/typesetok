@@ -10,7 +10,9 @@ import { pathToFileURL } from 'node:url';
 import { performance } from 'node:perf_hooks';
 import esbuild from 'esbuild';
 
-const [versionRoot, tokCli, label, paraArg, ...extra] = process.argv.slice(2);
+const [versionRoot, tokCli, label, paraArg, ...rest] = process.argv.slice(2);
+const stringIpc = rest.includes('--ipc=string');
+const extra = rest.filter((a) => a !== '--ipc=string');
 const N = Number(paraArg);
 const RUNS = 7;
 
@@ -79,14 +81,25 @@ for (let run = 0; run < RUNS; run++) {
   s = performance.now();
   const raw = fs.readFileSync(outFile, 'utf-8');
   outBytes = raw.length;
-  const parsed = JSON.parse(raw);
-  const pages = Array.isArray(parsed) ? parsed : parsed.pages;
+  let pages;
+  let cloned;
+  if (stringIpc) {
+    const sent = structuredClone({ layoutJson: raw });
+    t.ipc = performance.now() - s;
+    s = performance.now();
+    const parsed = JSON.parse(sent.layoutJson);
+    pages = Array.isArray(parsed) ? parsed : parsed.pages;
+    cloned = { pages };
+    t.parse = performance.now() - s;
+  } else {
+    const parsed = JSON.parse(raw);
+    pages = Array.isArray(parsed) ? parsed : parsed.pages;
+    t.parse = performance.now() - s;
+    s = performance.now();
+    cloned = structuredClone(Array.isArray(parsed) ? { pages } : { pages, preflight: parsed.preflight });
+    t.ipc = performance.now() - s;
+  }
   pageCount = pages.length;
-  t.parse = performance.now() - s;
-
-  s = performance.now();
-  const cloned = structuredClone(Array.isArray(parsed) ? { pages } : { pages, preflight: parsed.preflight });
-  t.ipc = performance.now() - s;
 
   s = performance.now();
   layoutToPageDescriptors(cloned.pages, lookup);

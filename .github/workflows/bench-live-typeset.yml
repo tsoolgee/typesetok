@@ -13,26 +13,28 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      - name: Prepare both versions
+      - name: Prepare three versions
         shell: pwsh
         run: |
-          git fetch --no-tags https://github.com/TypesetOK/typesetok.git refs/tags/v0.35.2:refs/tags/v0.35.2
-          git worktree add ..\v352 v0.35.2
+          foreach ($t in 'v0.35.2', 'v0.36.1') {
+            git fetch --no-tags https://github.com/TypesetOK/typesetok.git "refs/tags/${t}:refs/tags/${t}"
+            git worktree add "..\$t" $t
+          }
           npm install --ignore-scripts
           cargo build --release -p tok-cli
-          Copy-Item target\release\tok-cli.exe ..\tok-cli-361.exe
-          Push-Location ..\v352
-          cargo build --release -p tok-cli
-          Copy-Item target\release\tok-cli.exe ..\tok-cli-352.exe
-          Pop-Location
+          Copy-Item target\release\tok-cli.exe ..\tok-cli-fix.exe
+          foreach ($t in 'v0.35.2', 'v0.36.1') {
+            Push-Location "..\$t"
+            cargo build --release -p tok-cli
+            Copy-Item target\release\tok-cli.exe "..\tok-cli-$t.exe"
+            Pop-Location
+          }
 
       - name: Bench
         shell: pwsh
@@ -40,11 +42,11 @@ jobs:
           $b = "scripts/bench-live-typeset.mjs"
           $out = @()
           foreach ($n in 150, 600, 1500) {
-            $out += node $b ..\v352 ..\tok-cli-352.exe "0.35.2 (app)" $n
-            $out += node $b . ..\tok-cli-361.exe "0.36.1 (app: preflight+assets)" $n --with-preflight --assets-from '@PKG'
-            $out += node $b . ..\tok-cli-361.exe "0.36.1 preflight only" $n --with-preflight
-            $out += node $b . ..\tok-cli-361.exe "0.36.1 assets only" $n --assets-from '@PKG'
-            $out += node $b . ..\tok-cli-361.exe "0.36.1 neither" $n
+            $out += node $b ..\v0.35.2 ..\tok-cli-v0.35.2.exe "0.35.2" $n
+            $out += node $b ..\v0.36.1 ..\tok-cli-v0.36.1.exe "0.36.1" $n --with-preflight --assets-from '@PKG'
+            $out += node $b . ..\tok-cli-fix.exe "fix: rust only" $n --with-preflight --assets-from '@PKG'
+            $out += node $b . ..\tok-cli-fix.exe "fix: rust + string ipc" $n --with-preflight --assets-from '@PKG' --ipc=string
+            $out += node $b . ..\tok-cli-fix.exe "fix, no preflight (cost of it)" $n --assets-from '@PKG' --ipc=string
             $out += ""
           }
           $out | ForEach-Object { Write-Host $_ }
@@ -59,3 +61,29 @@ jobs:
         with:
           name: bench-live-typeset
           path: bench-out/
+
+  tests:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Rust checks
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+      - name: Build tok-cli
+        run: cargo build --release -p tok-cli
+      - name: Frontend build and tests
+        shell: pwsh
+        env:
+          TOK_CLI_PATH: target/release/tok-cli.exe
+        run: |
+          npm install
+          npm run build
+          npm test
